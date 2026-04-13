@@ -66,21 +66,21 @@
 
 ## 当前运行逻辑
 
-1. 用户输入包含沪深京市场个股代码的请求
-2. agent 从用户输入中提取沪深京市场个股代码
-3. agent 使用提取出的个股代码调用东方财富妙想 mx-data skill，查询个股基本面相关数据
-4. agent 将查询结果整理并写入 Markdown 文件
+1. 用户输入包含沪深京市场个股代码或股票名称的请求
+2. agent 从用户输入中提取沪深京市场个股代码或股票名称
+3. agent 使用提取出的代码或名称调用东方财富妙想 mx-data skill，查询个股基本面相关数据
+4. agent 将查询结果交给外部 LLM 整理为易于阅读的 Markdown 正文
 5. agent 返回“个股基本面信息收集完成”的结果提示
 
 ## 用例
 
-向 `graph` 传入包含沪深京个股代码的请求，例如: 
+向 `graph` 传入包含沪深京个股代码或股票名称的请求，例如: 
 
 ```python
 from fundamentals_agent.graph import graph
 
 result = graph.invoke(
-    {"messages": [{"role": "user", "content": "请分析 600519 的基本面"}]}
+    {"messages": [{"role": "user", "content": "请分析贵州茅台的基本面"}]}
 )
 
 print(result["messages"][-1].content)
@@ -90,19 +90,24 @@ print(result["messages"][-1].content)
 
 东方财富妙想 skill 默认直接读取项目内子模块 `./eastmoney-mx-skills`；只有你想覆盖默认位置时，才需要额外设置 `EASTMONEY_MX_SKILLS_DIR` 或 `EASTMONEY_MX_DATA_PATH`。
 
-当前实现不依赖外部 LLM。主流程只围绕“识别个股代码 -> 调用东方财富妙想 skill -> 写入 Markdown -> 返回完成提示”执行，避免把总结类能力混入基本面信息收集链路。
+当前实现会在 mx-data 查询完成后，调用外部 LLM 生成更易读的 Markdown 正文，同时保留原始查询明细作为附录，便于追溯数据来源与查询语句。
 
-## 可选外部 LLM 模块
+## 外部 LLM 配置
 
-仓库额外提供了一个与 fundamentals agent 主流程完全解耦的独立模块 [src/fundamentals_agent/llm_clients.py](src/fundamentals_agent/llm_clients.py)，用于按 OpenAI 兼容 Chat Completions 接口调用 OpenAI 和智谱。
+fundamentals agent 主流程现在依赖外部 LLM 整理 mx-data 查询结果。当前支持两类 provider：
 
-这个模块当前只提供通用调用能力，不会被 [src/fundamentals_agent/graph.py](src/fundamentals_agent/graph.py) 或 [src/fundamentals_agent/fundamentals.py](src/fundamentals_agent/fundamentals.py) 自动引用，因此不会改变现有“识别股票代码 -> 查询东方财富妙想 skill -> 写入 Markdown -> 返回完成提示”的业务逻辑。
+- OpenAI 兼容接口
+- 智谱 GLM 接口
 
-### 配置
+主流程通过 [src/fundamentals_agent/report_formatting.py](src/fundamentals_agent/report_formatting.py) 读取 `FUNDAMENTALS_LLM_PROVIDER` 并调用 [src/fundamentals_agent/llm_clients.py](src/fundamentals_agent/llm_clients.py) 中的 Chat Completions 客户端。如果未配置 provider、API Key 或模型名，报告生成会直接失败并返回明确错误。
+
+### 必填配置
 
 请先在 `.env` 中补充所需 provider 的配置，`.env.example` 已增加对应示例：
 
 ```dotenv
+FUNDAMENTALS_LLM_PROVIDER=openai
+
 OPENAI_API_KEY=
 OPENAI_MODEL=
 OPENAI_BASE_URL=https://api.openai.com/v1
@@ -114,9 +119,21 @@ ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 ZHIPU_TIMEOUT_SECONDS=30
 ```
 
+- `FUNDAMENTALS_LLM_PROVIDER` 必须显式设置为 `openai` 或 `zhipu`
 - `OPENAI_MODEL` 和 `ZHIPU_MODEL` 需要按你的账号可用模型手动填写
 - 如果你有代理网关或企业网关，可以覆盖 `OPENAI_BASE_URL` 或 `ZHIPU_BASE_URL`
-- 未填写对应 provider 的 `API_KEY` 和 `MODEL` 时，模块会直接抛出配置错误，避免发起不完整请求
+- 未填写当前 provider 对应的 `API_KEY` 和 `MODEL` 时，模块会直接抛出配置错误，避免发起不完整请求
+
+### 主流程行为
+
+- 代码输入会直接按沪深京市场规则识别并查询
+- 股票名称输入会先用名称请求一次 mx-data，解析出标准证券代码后，再继续四组基本面查询
+- 外部 LLM 只负责整理 mx-data 已返回的内容，不应额外编造公司信息
+- 最终 markdown 文件包含两部分：外部 LLM 整理结果，以及原始查询明细附录
+
+## 独立 LLM 客户端模块
+
+仓库仍然保留独立模块 [src/fundamentals_agent/llm_clients.py](src/fundamentals_agent/llm_clients.py)，你也可以在主流程之外单独调用 OpenAI 或智谱接口。
 
 ### 使用示例
 
@@ -150,8 +167,9 @@ print(zhipu_result.content)
 
 ## 测试
 
-- 单元测试和集成测试均不依赖外部 LLM
-- 外部 LLM 模块只做独立单元测试，验证配置读取、请求组装和响应解析，不参与当前 fundamentals agent 主链路
+- fundamentals agent 主链路的单元测试使用 fake mx-data client + fake LLM summarizer，验证“识别输入 -> 查询 mx-data -> 调用外部 LLM -> 写入 Markdown”的完整业务链路
+- 集成测试会真实调用东方财富妙想 mx-data skill，但默认仍使用 fake LLM summarizer，避免把外部 LLM 网络波动引入回归测试
+- 外部 LLM 客户端模块继续保留独立单元测试，验证配置读取、请求组装和响应解析
 - 单元测试使用可记录查询语句的 fake mx-data client，并按股票代码动态生成测试数据，避免测试产物退化为固定硬编码文案
 - 集成测试直接调用真实东方财富妙想 mx-data skill，验证用户真实输入能否触发实际查询并生成 Markdown 报告
 - 测试产物统一输出到 `reports/test-artifacts/<sanitized-nodeid>/`，便于对生成的 Markdown 报告做回归检查
@@ -189,9 +207,9 @@ uv run python -m tests.verify_test_artifacts
 
 `make test` 现在等价于 `make test-flow`。其中：
 
-- 单元测试会断言程序确实按 `600519.SH + 四个基础查询 bundle` 组装查询，而不是只比对固定返回文案
+- 单元测试会断言程序确实按 `股票代码/名称识别 -> 四个基础查询 bundle -> 外部 LLM 整理` 组装完整链路，而不是只比对固定返回文案
 - 集成测试会在本地有 `MX_APIKEY` 时真正调用东方财富妙想 mx-data skill
-- 最后一步会验证测试期间实际生成的 Markdown 文件至少包含四条查询语句、结构化表格数据、股票标识、数据来源和四个基础章节，避免只测返回消息而漏掉最终产物质量
+- 最后一步会验证测试期间实际生成的 Markdown 文件至少包含外部 LLM 整理结果、四条查询语句、结构化表格数据、股票标识、数据来源和四个基础章节，避免只测返回消息而漏掉最终产物质量
 
 ## Reference docs
 

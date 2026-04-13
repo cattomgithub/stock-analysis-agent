@@ -16,6 +16,8 @@ from typing import Any
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 
+from .report_formatting import summarize_reports_with_external_llm
+
 load_dotenv()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -60,6 +62,37 @@ STOCK_CODE_PATTERN = re.compile(
     r"(?<!\d)(?:(?P<prefix>SH|SZ|BJ)\s*)?(?P<code>\d{6})(?:\.(?P<suffix>SH|SZ|BJ))?(?!\d)",
     re.IGNORECASE,
 )
+NAME_BODY_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"(?:请|帮我|麻烦|想|想要|请帮我|给我|帮忙)?"
+        r"(?:分析|看看|看下|查询|研究|了解|关注|梳理|总结|介绍|评估|说明|聊聊)?"
+        r"\s*(?P<body>[\u4e00-\u9fffA-Za-z0-9、，,和及与/\s]{2,48}?)"
+        r"(?:的)?(?:基本面|财务|公司概况|盈利能力|估值|资产负债|现金流|股东结构|情况|业务)"
+    ),
+    re.compile(
+        r"(?P<body>[\u4e00-\u9fffA-Za-z0-9、，,和及与/\s]{2,48}?)"
+        r"(?:这只|这家)?(?:股票|个股|公司)(?:的)?(?:基本面|财务|情况|业务|估值|盈利)?"
+    ),
+)
+NAME_SPLIT_PATTERN = re.compile(r"(?:、|，|,|/|\s+|和|及|与)+")
+NAME_LEADING_NOISE_PATTERN = re.compile(
+    r"^(?:请|帮我|麻烦|想|想要|请帮我|给我|帮忙|分析|看看|看下|查询|研究|了解|关注|梳理|总结|介绍|评估|说明|聊聊)+"
+)
+NAME_TRAILING_NOISE_PATTERN = re.compile(
+    r"(?:的|股票|个股|公司|基本面|财务|情况|业务|估值|盈利|表现)+$"
+)
+GENERIC_NAME_TOKENS = {
+    "基本面",
+    "个股",
+    "股票",
+    "公司",
+    "财务",
+    "情况",
+    "业务",
+    "估值",
+    "盈利",
+    "表现",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +119,70 @@ class StockReport:
     target: StockTarget
     entity_label: str
     sections: list[SectionResult]
+
+
+def _normalize_name_candidate(candidate: str) -> str:
+    normalized = candidate.strip()
+    previous = None
+    while normalized and normalized != previous:
+        previous = normalized
+        normalized = NAME_LEADING_NOISE_PATTERN.sub("", normalized).strip()
+        normalized = NAME_TRAILING_NOISE_PATTERN.sub("", normalized).strip()
+    return normalized
+
+
+def _looks_like_stock_name(candidate: str) -> bool:
+    if not candidate:
+        return False
+    if candidate in GENERIC_NAME_TOKENS:
+        return False
+    if candidate.isdigit():
+        return False
+    if not (2 <= len(candidate) <= 12):
+        return False
+    return bool(re.search(r"[\u4e00-\u9fff]", candidate))
+
+
+def extract_cn_stock_name_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+    sanitized_text = STOCK_CODE_PATTERN.sub(" ", text)
+
+    for pattern in NAME_BODY_PATTERNS:
+        for match in pattern.finditer(sanitized_text):
+            body = str(match.group("body") or "")
+            for token in NAME_SPLIT_PATTERN.split(body):
+                normalized = _normalize_name_candidate(token)
+                if not _looks_like_stock_name(normalized):
+                    continue
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                candidates.append(normalized)
+
+    if not candidates:
+        for token in NAME_SPLIT_PATTERN.split(sanitized_text):
+            normalized = _normalize_name_candidate(token)
+            if not _looks_like_stock_name(normalized):
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            candidates.append(normalized)
+
+    whole_candidate = _normalize_name_candidate(
+        re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", sanitized_text)
+    )
+    has_explicit_separator = bool(re.search(r"\s[和及与]\s|[、，,/]", sanitized_text))
+    if (
+        not candidates
+        and not has_explicit_separator
+        and _looks_like_stock_name(whole_candidate)
+        and whole_candidate not in seen
+    ):
+        seen.add(whole_candidate)
+        candidates.append(whole_candidate)
+    return candidates
 
 
 def infer_market_from_code(code: str) -> str | None:
@@ -151,14 +248,33 @@ def create_mx_data_client(api_key: str | None = None) -> Any:
     return load_mx_data_class()(api_key=api_key or os.getenv("MX_APIKEY"))
 
 
-def extract_entity_label(result: dict[str, Any], fallback_symbol: str) -> str:
+def _iter_entity_tags(result: dict[str, Any]) -> list[dict[str, Any]]:
     search_result = (
         ((result.get("data") or {}).get("data") or {}).get("searchDataResultDTO") or {}
     )
     entity_tags = search_result.get("entityTagDTOList") or []
-    for entity in entity_tags:
-        if not isinstance(entity, dict):
+    return [entity for entity in entity_tags if isinstance(entity, dict)]
+
+
+def extract_stock_target_from_result(result: dict[str, Any]) -> StockTarget | None:
+    for entity in _iter_entity_tags(result):
+        code = re.sub(r"\D", "", str(entity.get("secuCode") or "").strip())
+        if len(code) != 6:
             continue
+
+        explicit_market = str(entity.get("marketChar") or "").replace(".", "").strip().upper()
+        inferred_market = infer_market_from_code(code)
+        market = explicit_market if explicit_market in {"SH", "SZ", "BJ"} else inferred_market
+        if market is None:
+            continue
+        if inferred_market is not None and market != inferred_market:
+            market = inferred_market
+        return StockTarget(code=code, market=market)
+    return None
+
+
+def extract_entity_label(result: dict[str, Any], fallback_symbol: str) -> str:
+    for entity in _iter_entity_tags(result):
         full_name = str(entity.get("fullName") or "").strip()
         secu_code = str(entity.get("secuCode") or "").strip()
         market_char = str(entity.get("marketChar") or "").strip()
@@ -173,6 +289,16 @@ def build_section_queries(target: StockTarget) -> tuple[tuple[str, str], ...]:
         (title, f"{target.symbol} {suffix}")
         for title, suffix in REPORT_QUERY_BUNDLES
     )
+
+
+def resolve_stock_target_from_name(client: Any, stock_name: str) -> StockTarget:
+    resolution_query = f"{stock_name} 公司简介 主营业务"
+    logger.debug("Resolving stock name %s with %s", stock_name, resolution_query)
+    result = client.query(resolution_query)
+    target = extract_stock_target_from_result(result)
+    if target is None:
+        raise ValueError(f"未能从东方财富妙想 mx-data 识别股票名称：{stock_name}")
+    return target
 
 
 def query_fundamental_section(
@@ -288,17 +414,8 @@ def render_section(section: SectionResult) -> str:
     return "\n".join(lines).rstrip()
 
 
-def render_markdown_report(user_input: str, reports: list[StockReport]) -> str:
-    target_list = "、".join(report.target.symbol for report in reports)
-    lines = [
-        "# 沪深京个股基本面报告",
-        "",
-        f"- 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"- 原始输入：{user_input}",
-        f"- 识别股票：{target_list}",
-        "- 数据来源：东方财富妙想 skills / mx-data",
-        "",
-    ]
+def _render_report_detail_sections(reports: list[StockReport]) -> list[str]:
+    lines: list[str] = []
     for report in reports:
         lines.extend(
             [
@@ -310,6 +427,34 @@ def render_markdown_report(user_input: str, reports: list[StockReport]) -> str:
         )
         for section in report.sections:
             lines.extend([render_section(section), "", ""])
+    return lines
+
+
+def render_markdown_report(
+    user_input: str,
+    reports: list[StockReport],
+    llm_summary_markdown: str,
+    llm_provider: str,
+    llm_model: str,
+) -> str:
+    target_list = "、".join(report.target.symbol for report in reports)
+    lines = [
+        "# 沪深京个股基本面报告",
+        "",
+        f"- 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- 原始输入：{user_input}",
+        f"- 识别股票：{target_list}",
+        "- 数据来源：东方财富妙想 skills / mx-data",
+        f"- 外部 LLM：{llm_provider} / {llm_model}",
+        "",
+        "## 外部 LLM 整理结果",
+        "",
+        llm_summary_markdown.strip(),
+        "",
+        "## 原始查询明细",
+        "",
+    ]
+    lines.extend(_render_report_detail_sections(reports))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -333,8 +478,9 @@ def render_completion_message(report_path: Path, targets: list[StockTarget]) -> 
     resolved = "、".join(target.symbol for target in targets)
     return "\n".join(
         [
-            f"已识别股票代码：{resolved}",
+            f"已识别股票：{resolved}",
             "已调用东方财富妙想 mx-data skill 完成个股基本面查询。",
+            "已调用外部 LLM 完成结果整理。",
             f"已生成 Markdown 报告：{report_path}",
             "个股基本面信息收集完成。",
         ]
@@ -342,14 +488,45 @@ def render_completion_message(report_path: Path, targets: list[StockTarget]) -> 
 
 
 def collect_reports_from_input(user_input: str) -> tuple[list[StockTarget], list[StockReport]]:
-    targets = extract_cn_stock_targets(user_input)
-    logger.debug("Extracted stock targets from input %r: %s", user_input, [target.symbol for target in targets])
-    if not targets:
+    client = create_mx_data_client()
+    code_targets = extract_cn_stock_targets(user_input)
+    stock_names = extract_cn_stock_name_candidates(user_input)
+    logger.debug(
+        "Extracted stock candidates from input %r: codes=%s names=%s",
+        user_input,
+        [target.symbol for target in code_targets],
+        stock_names,
+    )
+    if not code_targets and not stock_names:
         raise ValueError(
-            "未检测到沪深京个股代码，请提供 6 位个股代码，例如 600519、000001 或 430047。"
+            "未检测到沪深京个股代码或股票名称，请提供 6 位个股代码，或明确的个股名称，例如 600519、000001、贵州茅台。"
         )
 
-    client = create_mx_data_client()
+    targets: list[StockTarget] = []
+    seen_symbols: set[str] = set()
+    for target in code_targets:
+        if target.symbol in seen_symbols:
+            continue
+        seen_symbols.add(target.symbol)
+        targets.append(target)
+
+    unresolved_names: list[str] = []
+    for stock_name in stock_names:
+        try:
+            resolved_target = resolve_stock_target_from_name(client, stock_name)
+        except Exception as exc:
+            logger.debug("Failed to resolve stock name %s: %s", stock_name, exc)
+            unresolved_names.append(stock_name)
+            continue
+        if resolved_target.symbol in seen_symbols:
+            continue
+        seen_symbols.add(resolved_target.symbol)
+        targets.append(resolved_target)
+
+    if not targets:
+        unresolved_text = "、".join(unresolved_names) or user_input
+        raise ValueError(f"未能识别为沪深京个股：{unresolved_text}")
+
     reports = [collect_stock_report(client, target) for target in targets]
     return targets, reports
 
@@ -360,7 +537,14 @@ def build_fundamental_report(
 ) -> tuple[Path, list[StockTarget], str]:
     logger.debug("Building fundamental report for input: %s", user_input)
     targets, reports = collect_reports_from_input(user_input)
-    markdown_text = render_markdown_report(user_input, reports)
+    llm_response = summarize_reports_with_external_llm(user_input, reports)
+    markdown_text = render_markdown_report(
+        user_input,
+        reports,
+        llm_response.content,
+        llm_response.provider,
+        llm_response.model,
+    )
     report_path = write_markdown_report(markdown_text, reports, output_dir)
     logger.debug("Finished report generation at %s", report_path)
     return report_path, targets, markdown_text
@@ -368,12 +552,15 @@ def build_fundamental_report(
 
 @tool
 def detect_cn_stock_codes(text: str) -> str:
-    """Detect supported沪深京个股代码 from user input."""
+    """Detect supported沪深京个股代码或股票名称 from user input."""
 
     targets = extract_cn_stock_targets(text)
+    stock_names = extract_cn_stock_name_candidates(text)
     payload = {
         "contains_cn_stock_code": bool(targets),
+        "contains_cn_stock_target": bool(targets or stock_names),
         "codes": [target.symbol for target in targets],
+        "names": stock_names,
     }
     return json.dumps(payload, ensure_ascii=False)
 
@@ -383,7 +570,7 @@ def generate_cn_stock_fundamental_report(
     user_input: str,
     output_dir: str | None = None,
 ) -> str:
-    """Generate a Markdown fundamental report for沪深京 individual stocks using Eastmoney MX skills."""
+    """Generate a Markdown fundamental report for沪深京 individual stocks using Eastmoney MX skills and an external LLM."""
 
     try:
         report_path, targets, _markdown_text = build_fundamental_report(user_input, output_dir)
@@ -400,6 +587,7 @@ __all__ = [
     "collect_reports_from_input",
     "create_mx_data_client",
     "detect_cn_stock_codes",
+    "extract_cn_stock_name_candidates",
     "extract_cn_stock_targets",
     "generate_cn_stock_fundamental_report",
     "render_markdown_report",

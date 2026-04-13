@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 async def test_graph_generates_markdown_report_with_live_mx_skill(
     patch_live_mx_data_client,
+    patch_fake_llm_summarizer,
     report_output_dir,
 ) -> None:
     result = await graph.ainvoke(
@@ -39,6 +40,7 @@ async def test_graph_generates_markdown_report_with_live_mx_skill(
     assert_report_contains_queries(report_text, expected_queries)
     assert "600519.SH" in output_text
     assert "已调用东方财富妙想 mx-data skill 完成个股基本面查询。" in output_text
+    assert "已调用外部 LLM 完成结果整理。" in output_text
     assert "个股基本面信息收集完成。" in output_text
     assert "Markdown 报告" in output_text
     assert str(report_path) in output_text

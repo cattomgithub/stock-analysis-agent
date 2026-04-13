@@ -48,7 +48,7 @@ def analyze_request(state: MessagesState) -> dict[str, list[AIMessage]]:
     user_input = _last_user_message(state["messages"]).strip()
     logger.debug("Analyzing request with user input: %s", user_input)
     if not user_input:
-        response = "请输入包含沪深京个股代码的请求，例如：请分析 600519 的基本面。"
+        response = "请输入包含沪深京个股代码或股票名称的请求，例如：请分析 600519 或 贵州茅台 的基本面。"
     else:
         try:
             report_path, targets, _markdown_text = build_fundamental_report(user_input)
