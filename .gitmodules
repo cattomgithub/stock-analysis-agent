@@ -1,0 +1,3 @@
+[submodule "eastmoney-mx-skills"]
+	path = eastmoney-mx-skills
+	url = git@github.com:cattomgithub/eastmoney-mx-skills.git
