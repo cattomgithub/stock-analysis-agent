@@ -95,16 +95,17 @@ print(result["messages"][-1].content)
 ## 测试
 
 - 单元测试和集成测试均不依赖外部 LLM
-- 默认测试通过 fake mx-data client 验证“识别代码 -> 查询 -> 写 Markdown -> 返回完成提示”的完整链路
+- 单元测试使用可记录查询语句的 fake mx-data client，并按股票代码动态生成测试数据，避免测试产物退化为固定硬编码文案
+- 集成测试直接调用真实东方财富妙想 mx-data skill，验证用户真实输入能否触发实际查询并生成 Markdown 报告
 - 测试产物统一输出到 `reports/test-artifacts/<sanitized-nodeid>/`，便于对生成的 Markdown 报告做回归检查
-- 若要接入东方财富妙想接口，需要额外配置 `MX_APIKEY`
+- 运行真实集成测试前需要配置 `MX_APIKEY`；未配置时集成测试会跳过并在 pytest 汇总中明确提示
 
 推荐按下面四步执行测试流程：
 
 1. 语法检查：确认 `src/` 和 `tests/` 下没有语法错误
-2. 单元测试：验证代码提取、工具封装和报告生成函数
-3. 集成测试：验证 LangGraph 主链路可以完成端到端执行
-4. Markdown 产物校验：检查 `reports/test-artifacts/` 下新生成报告的结构和关键字段
+2. 单元测试：验证代码提取、查询计划、工具封装和报告生成函数，确认查询语句与用户输入一致
+3. 集成测试：用真实东方财富妙想 skill 验证 LangGraph 主链路可以完成端到端执行
+4. Markdown 产物校验：检查 `reports/test-artifacts/` 下新生成报告的结构、查询语句和表格数据行数
 
 如果本地使用 `make`，可以直接运行完整测试流程：
 
@@ -123,7 +124,11 @@ uv run python -m pytest tests/integration_tests -q
 uv run python -m tests.verify_test_artifacts
 ```
 
-`make test` 现在等价于 `make test-flow`。其中最后一步会验证测试期间实际生成的 Markdown 文件是否包含标题、股票标识、数据来源和四个基础章节，避免只测返回消息而漏掉最终产物质量。
+`make test` 现在等价于 `make test-flow`。其中：
+
+- 单元测试会断言程序确实按 `600519.SH + 四个基础查询 bundle` 组装查询，而不是只比对固定返回文案
+- 集成测试会在本地有 `MX_APIKEY` 时真正调用东方财富妙想 mx-data skill
+- 最后一步会验证测试期间实际生成的 Markdown 文件至少包含四条查询语句、结构化表格数据、股票标识、数据来源和四个基础章节，避免只测返回消息而漏掉最终产物质量
 
 ## Reference docs
 

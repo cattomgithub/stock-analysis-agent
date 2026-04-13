@@ -168,13 +168,19 @@ def extract_entity_label(result: dict[str, Any], fallback_symbol: str) -> str:
     return fallback_symbol
 
 
+def build_section_queries(target: StockTarget) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (title, f"{target.symbol} {suffix}")
+        for title, suffix in REPORT_QUERY_BUNDLES
+    )
+
+
 def query_fundamental_section(
     client: Any,
     target: StockTarget,
     title: str,
-    suffix: str,
+    query_text: str,
 ) -> tuple[SectionResult, str]:
-    query_text = f"{target.symbol} {suffix}"
     logger.debug("Querying section %s for %s with %s", title, target.symbol, query_text)
     result = client.query(query_text)
     tables, conditions, _total_rows, error = client.parse_result(result)
@@ -194,13 +200,13 @@ def collect_stock_report(client: Any, target: StockTarget) -> StockReport:
     sections: list[SectionResult] = []
     entity_label = target.symbol
     logger.debug("Collecting report sections for %s", target.symbol)
-    for title, suffix in REPORT_QUERY_BUNDLES:
+    for title, query_text in build_section_queries(target):
         try:
             section, resolved_entity_label = query_fundamental_section(
                 client,
                 target,
                 title,
-                suffix,
+                query_text,
             )
             if resolved_entity_label != target.symbol:
                 entity_label = resolved_entity_label
@@ -208,7 +214,7 @@ def collect_stock_report(client: Any, target: StockTarget) -> StockReport:
             logger.debug("Section %s failed for %s: %s", title, target.symbol, exc)
             section = SectionResult(
                 title=title,
-                query_text=f"{target.symbol} {suffix}",
+                query_text=query_text,
                 tables=[],
                 conditions=[],
                 error=str(exc),
@@ -390,6 +396,7 @@ def generate_cn_stock_fundamental_report(
 __all__ = [
     "StockTarget",
     "build_fundamental_report",
+    "build_section_queries",
     "collect_reports_from_input",
     "create_mx_data_client",
     "detect_cn_stock_codes",

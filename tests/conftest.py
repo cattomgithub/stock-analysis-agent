@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 import re
 import shutil
@@ -11,6 +12,7 @@ import pytest
 LOGGER = logging.getLogger("tests")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TEST_ARTIFACTS_DIR = REPO_ROOT / "reports" / "test-artifacts"
+QUERY_SYMBOL_PATTERN = re.compile(r"(?P<code>\d{6})\.(?P<market>SH|SZ|BJ)")
 
 
 @pytest.fixture(scope="session")
@@ -59,7 +61,29 @@ def report_output_dir(
 
 
 class FakeMXData:
+    def __init__(self) -> None:
+        self.query_log: list[str] = []
+
+    @staticmethod
+    def company_name(symbol: str) -> str:
+        code, market = symbol.split(".")
+        return f"测试样本{market}{code}"
+
+    @staticmethod
+    def _extract_symbol(tool_query: str) -> str:
+        match = QUERY_SYMBOL_PATTERN.search(tool_query)
+        if match is None:
+            raise AssertionError(f"无法从查询语句中识别股票代码: {tool_query}")
+        return f"{match.group('code')}.{match.group('market')}"
+
+    @staticmethod
+    def _seed(symbol: str) -> int:
+        return int(symbol[:6][-2:])
+
     def query(self, tool_query: str) -> dict[str, Any]:
+        symbol = self._extract_symbol(tool_query)
+        code, market = symbol.split(".")
+        self.query_log.append(tool_query)
         return {
             "query": tool_query,
             "data": {
@@ -67,9 +91,9 @@ class FakeMXData:
                     "searchDataResultDTO": {
                         "entityTagDTOList": [
                             {
-                                "fullName": "贵州茅台",
-                                "secuCode": "600519",
-                                "marketChar": ".SH",
+                                "fullName": self.company_name(symbol),
+                                "secuCode": code,
+                                "marketChar": f".{market}",
                             }
                         ]
                     }
@@ -77,15 +101,22 @@ class FakeMXData:
             },
         }
 
-    @staticmethod
     def parse_result(
+        self,
         result: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], list[str], int, str | None]:
         query = result["query"]
+        symbol = self._extract_symbol(query)
+        company_name = self.company_name(symbol)
+        seed = self._seed(symbol)
+
         if "公司概况" in query or "公司简介" in query:
             rows = [
-                {"字段": "公司简介", "数值": "高端白酒龙头"},
-                {"字段": "总股本", "数值": "12.56 亿股"},
+                {
+                    "字段": "公司简介",
+                    "数值": f"{company_name} 围绕 {symbol} 的主营业务测试样本",
+                },
+                {"字段": "总股本", "数值": f"{10 + seed / 100:.2f} 亿股"},
             ]
             return (
                 [
@@ -95,26 +126,64 @@ class FakeMXData:
                         "rows": rows,
                     }
                 ],
-                ["[贵州茅台] 公司概况"],
+                [f"[{company_name}] 公司概况", f"symbol={symbol}"],
                 len(rows),
                 None,
             )
         if "股东结构" in query or "十大股东" in query:
+            row = {
+                "股东": f"{company_name} 控股股东",
+                "持股比例": f"{40 + seed % 10}.0{seed % 7}%",
+            }
             return (
                 [
                     {
                         "sheet_name": "股东结构",
                         "fieldnames": ["股东", "持股比例"],
-                        "rows": [{"股东": "中国贵州茅台酒厂", "持股比例": "54.07%"}],
+                        "rows": [row],
                     }
                 ],
-                [],
+                [f"[{company_name}] 股东结构"],
                 1,
                 None,
             )
+        if "资产负债率" in query or "自由现金流" in query:
+            rows = [
+                {
+                    "date": "2024",
+                    "资产负债率": f"{20 + seed % 15}.10%",
+                    "经营活动现金流净额": f"{100 + seed} 亿",
+                },
+                {
+                    "date": "2023",
+                    "资产负债率": f"{19 + seed % 12}.80%",
+                    "经营活动现金流净额": f"{90 + seed} 亿",
+                },
+            ]
+            return (
+                [
+                    {
+                        "sheet_name": "资产与现金流",
+                        "fieldnames": ["date", "资产负债率", "经营活动现金流净额"],
+                        "rows": rows,
+                    }
+                ],
+                [f"[{company_name}] 资产与现金流"],
+                len(rows),
+                None,
+            )
+
         rows = [
-            {"date": "2024", "每股收益": "59.49", "净资产收益率": "34.74%"},
-            {"date": "2023", "每股收益": "56.28", "净资产收益率": "33.90%"},
+            {
+                "date": "2024",
+                "每股收益": f"{50 + seed / 10:.2f}",
+                "净资产收益率": f"{30 + seed % 10}.40%",
+            },
+            {
+                "date": "2023",
+                "每股收益": f"{45 + seed / 10:.2f}",
+                "净资产收益率": f"{28 + seed % 10}.10%",
+            },
         ]
         return (
             [
@@ -124,10 +193,26 @@ class FakeMXData:
                     "rows": rows,
                 }
             ],
-            [],
+            [f"[{company_name}] 盈利与估值"],
             len(rows),
             None,
         )
+
+
+class RecordingMXDataClient:
+    def __init__(self, delegate: Any) -> None:
+        self._delegate = delegate
+        self.query_log: list[str] = []
+
+    def query(self, tool_query: str) -> dict[str, Any]:
+        self.query_log.append(tool_query)
+        return self._delegate.query(tool_query)
+
+    def parse_result(
+        self,
+        result: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], list[str], int, str | None]:
+        return self._delegate.parse_result(result)
 
 
 @pytest.fixture
@@ -145,3 +230,20 @@ def patch_fake_mx_data_client(
         lambda api_key=None: fake_mx_data_client,
     )
     return fake_mx_data_client
+
+
+@pytest.fixture
+def patch_live_mx_data_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> RecordingMXDataClient:
+    from fundamentals_agent.fundamentals import create_mx_data_client
+
+    if not os.getenv("MX_APIKEY"):
+        pytest.skip("未配置 MX_APIKEY，跳过真实东方财富妙想集成测试。")
+
+    live_mx_data_client = RecordingMXDataClient(create_mx_data_client())
+    monkeypatch.setattr(
+        "fundamentals_agent.fundamentals.create_mx_data_client",
+        lambda api_key=None: live_mx_data_client,
+    )
+    return live_mx_data_client
