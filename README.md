@@ -92,9 +92,66 @@ print(result["messages"][-1].content)
 
 当前实现不依赖外部 LLM。主流程只围绕“识别个股代码 -> 调用东方财富妙想 skill -> 写入 Markdown -> 返回完成提示”执行，避免把总结类能力混入基本面信息收集链路。
 
+## 可选外部 LLM 模块
+
+仓库额外提供了一个与 fundamentals agent 主流程完全解耦的独立模块 [src/fundamentals_agent/llm_clients.py](src/fundamentals_agent/llm_clients.py)，用于按 OpenAI 兼容 Chat Completions 接口调用 OpenAI 和智谱。
+
+这个模块当前只提供通用调用能力，不会被 [src/fundamentals_agent/graph.py](src/fundamentals_agent/graph.py) 或 [src/fundamentals_agent/fundamentals.py](src/fundamentals_agent/fundamentals.py) 自动引用，因此不会改变现有“识别股票代码 -> 查询东方财富妙想 skill -> 写入 Markdown -> 返回完成提示”的业务逻辑。
+
+### 配置
+
+请先在 `.env` 中补充所需 provider 的配置，`.env.example` 已增加对应示例：
+
+```dotenv
+OPENAI_API_KEY=
+OPENAI_MODEL=
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_TIMEOUT_SECONDS=30
+
+ZHIPU_API_KEY=
+ZHIPU_MODEL=
+ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+ZHIPU_TIMEOUT_SECONDS=30
+```
+
+- `OPENAI_MODEL` 和 `ZHIPU_MODEL` 需要按你的账号可用模型手动填写
+- 如果你有代理网关或企业网关，可以覆盖 `OPENAI_BASE_URL` 或 `ZHIPU_BASE_URL`
+- 未填写对应 provider 的 `API_KEY` 和 `MODEL` 时，模块会直接抛出配置错误，避免发起不完整请求
+
+### 使用示例
+
+```python
+from fundamentals_agent.llm_clients import create_openai_client, create_zhipu_client
+
+openai_client = create_openai_client()
+openai_result = openai_client.prompt(
+    "请用三句话说明什么是自由现金流",
+    system_prompt="你是一名严谨的中文投研助手。",
+)
+print(openai_result.content)
+
+zhipu_client = create_zhipu_client()
+zhipu_result = zhipu_client.chat(
+    [
+        {"role": "system", "content": "你是一名严谨的中文投研助手。"},
+        {"role": "user", "content": "请解释市盈率的常见误区。"},
+    ]
+)
+print(zhipu_result.content)
+```
+
+模块返回统一的 `LLMResponse` 对象，包含：
+
+- `provider`：调用的 provider 名称
+- `model`：实际返回的模型名称
+- `content`：首个 assistant 回复文本
+- `usage`：接口返回的 token 使用情况
+- `raw_response`：完整原始 JSON，便于你在独立脚本里做二次处理
+
 ## 测试
 
 - 单元测试和集成测试均不依赖外部 LLM
+- 外部 LLM 模块只做独立单元测试，验证配置读取、请求组装和响应解析，不参与当前 fundamentals agent 主链路
 - 单元测试使用可记录查询语句的 fake mx-data client，并按股票代码动态生成测试数据，避免测试产物退化为固定硬编码文案
 - 集成测试直接调用真实东方财富妙想 mx-data skill，验证用户真实输入能否触发实际查询并生成 Markdown 报告
 - 测试产物统一输出到 `reports/test-artifacts/<sanitized-nodeid>/`，便于对生成的 Markdown 报告做回归检查
@@ -106,6 +163,12 @@ print(result["messages"][-1].content)
 2. 单元测试：验证代码提取、查询计划、工具封装和报告生成函数，确认查询语句与用户输入一致
 3. 集成测试：用真实东方财富妙想 skill 验证 LangGraph 主链路可以完成端到端执行
 4. Markdown 产物校验：检查 `reports/test-artifacts/` 下新生成报告的结构、查询语句和表格数据行数
+
+如果你要验证新增的外部 LLM 模块，可以额外运行：
+
+```bash
+uv run python -m pytest tests/unit_tests/test_llm_clients.py -q
+```
 
 如果本地使用 `make`，可以直接运行完整测试流程：
 
