@@ -8,6 +8,7 @@ from fundamentals_agent.fundamentals import (
     generate_cn_stock_fundamental_report,
 )
 from fundamentals_agent.graph import graph
+from tests.report_checks import assert_generated_markdown_report
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +48,15 @@ def test_build_fundamental_report_writes_markdown(
 
     assert report_path.exists()
     assert [target.symbol for target in targets] == ["600519.SH"]
+    validated_path, report_text = assert_generated_markdown_report(
+        report_output_dir,
+        expected_symbol="600519.SH",
+        expected_name="贵州茅台",
+    )
+
+    assert validated_path == report_path
     assert "贵州茅台" in markdown_text
-    assert "高端白酒龙头" in markdown_text
+    assert "高端白酒龙头" in report_text
 
 
 def test_generate_cn_stock_fundamental_report_returns_completion_message(
@@ -62,6 +70,14 @@ def test_generate_cn_stock_fundamental_report_returns_completion_message(
         }
     )
 
+    report_path, report_text = assert_generated_markdown_report(
+        report_output_dir,
+        expected_symbol="600519.SH",
+        expected_name="贵州茅台",
+    )
+
     assert "600519.SH" in result
     assert "已调用东方财富妙想 mx-data skill 完成个股基本面查询。" in result
+    assert str(report_path) in result
     assert "个股基本面信息收集完成。" in result
+    assert "高端白酒龙头" in report_text

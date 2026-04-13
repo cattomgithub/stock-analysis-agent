@@ -1,4 +1,7 @@
-.PHONY: help install dev upgrade run unit-tests integration-tests test lint format
+.PHONY: help install dev upgrade run clean-test-artifacts syntax-check unit-tests integration-tests verify-test-artifacts test-flow test lint format
+
+PYTHON = uv run python
+PYTEST = $(PYTHON) -m pytest
 
 help:
 	@echo 'Targets:'
@@ -6,9 +9,13 @@ help:
 	@echo '  dev                 Sync project + dev dependencies with uv'
 	@echo '  upgrade             Upgrade and resync project dependencies with uv'
 	@echo '  run                 Start the local LangGraph dev server'
+	@echo '  clean-test-artifacts Remove generated markdown test artifacts'
+	@echo '  syntax-check        Compile src/tests to catch syntax errors'
 	@echo '  unit-tests          Run unit tests'
 	@echo '  integration-tests   Run integration tests'
-	@echo '  test                Run unit tests + mocked integration tests'
+	@echo '  verify-test-artifacts Validate generated markdown test artifacts'
+	@echo '  test-flow           Run syntax, unit, integration, and artifact checks'
+	@echo '  test                Alias of test-flow'
 	@echo '  lint                Run Ruff checks'
 	@echo '  format              Format with Ruff'
 
@@ -24,16 +31,31 @@ upgrade:
 run:
 	uv run langgraph dev
 
+clean-test-artifacts:
+	$(PYTHON) -c "from pathlib import Path; import shutil; root = Path('reports/test-artifacts'); shutil.rmtree(root, ignore_errors=True); print(f'cleaned {root}')"
+
+syntax-check:
+	$(PYTHON) -m compileall -q src tests
+
 unit-tests:
-	uv run python -m pytest tests/unit_tests -q
+	$(PYTEST) tests/unit_tests -q
 
 integration-tests:
-	uv run python -m pytest tests/integration_tests -q
+	$(PYTEST) tests/integration_tests -q
 
-test: unit-tests integration-tests
+verify-test-artifacts:
+	$(PYTHON) -m tests.verify_test_artifacts
+
+test-flow: clean-test-artifacts
+	$(MAKE) syntax-check
+	$(MAKE) unit-tests
+	$(MAKE) integration-tests
+	$(MAKE) verify-test-artifacts
+
+test: test-flow
 
 lint:
-	uv run python -m ruff check src tests
+	$(PYTHON) -m ruff check src tests
 
 format:
-	uv run python -m ruff format src tests
+	$(PYTHON) -m ruff format src tests

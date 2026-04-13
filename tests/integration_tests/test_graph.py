@@ -3,6 +3,7 @@ import logging
 import pytest
 
 from fundamentals_agent.graph import graph
+from tests.report_checks import assert_generated_markdown_report
 
 pytestmark = pytest.mark.anyio
 
@@ -18,11 +19,16 @@ async def test_graph_generates_markdown_report(
     )
 
     output_text = str(result["messages"][-1].content)
-    report_files = sorted(report_output_dir.glob("fundamentals_*.md"))
+    report_path, report_text = assert_generated_markdown_report(
+        report_output_dir,
+        expected_symbol="600519.SH",
+        expected_name="贵州茅台",
+    )
     logger.debug("Mock integration output: %s", output_text)
-    logger.debug("Mock integration report files: %s", [str(path) for path in report_files])
+    logger.debug("Mock integration report path: %s", report_path)
     assert "600519.SH" in output_text
     assert "已调用东方财富妙想 mx-data skill 完成个股基本面查询。" in output_text
     assert "个股基本面信息收集完成。" in output_text
     assert "Markdown 报告" in output_text
-    assert report_files
+    assert str(report_path) in output_text
+    assert "高端白酒龙头" in report_text
