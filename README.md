@@ -72,10 +72,12 @@
 uv sync --dev
 ```
 
-2. Configure environment:
+2. Configure environment variables:
 
 ```bash
-cp .env.example .env
+export MX_APIKEY=your_api_key_here
+export EASTMONEY_MX_SKILLS_DIR=../eastmoney-mx-skills
+export STOCK_ANALYSIS_REPORT_DIR=./reports
 ```
 
 3. Run locally:
@@ -91,6 +93,22 @@ make dev
 make run
 ```
 
+## Usage
+
+向 graph 传入包含沪深京个股代码的用户请求，例如：
+
+```python
+from simple_agent.graph import graph
+
+result = graph.invoke(
+    {"messages": [{"role": "user", "content": "请分析 600519 的基本面"}]}
+)
+
+print(result["messages"][-1].content)
+```
+
+运行后会在 `STOCK_ANALYSIS_REPORT_DIR` 指定目录生成 markdown 文件，默认输出到项目根目录下的 `reports/`。
+
 ## Tests and lint
 
 ```bash
@@ -100,7 +118,7 @@ make lint
 make format
 ```
 
-Integration tests are skipped unless `ANTHROPIC_API_KEY` is set.
+单元测试不依赖外部服务。接入真实东方财富妙想接口时，请先配置 `MX_APIKEY`。
 
 ## Reference docs
 

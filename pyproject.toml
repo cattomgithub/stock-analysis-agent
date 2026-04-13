@@ -6,9 +6,10 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "langchain>=1.0.0",
-    "langchain-anthropic>=1.0.0",
     "langgraph>=1.0.0",
+    "pandas>=2.2.3",
     "python-dotenv>=1.0.1",
+    "requests>=2.32.3",
 ]
 
 [build-system]

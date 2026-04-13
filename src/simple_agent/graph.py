@@ -1,61 +1,58 @@
-"""Minimal LangChain agent graph for deployment."""
+"""LangGraph workflow for CN stock fundamental analysis."""
 
 from __future__ import annotations
 
-import ast
-import os
-from datetime import datetime, timezone
 from typing import Any
 
-from langchain.agents import create_agent
-from langchain_core.tools import tool
+from langchain_core.messages import AIMessage
+from langgraph.graph import END, START, MessagesState, StateGraph
 
-DEFAULT_MODEL = os.getenv("SIMPLE_AGENT_MODEL", "anthropic:claude-sonnet-4-6")
-
-
-@tool
-def utc_now() -> str:
-    """Return the current UTC timestamp in ISO format."""
-    return datetime.now(tz=timezone.utc).isoformat()
+from simple_agent.fundamentals import generate_cn_stock_fundamental_report
 
 
-@tool
-def calculator(expression: str) -> str:
-    """Evaluate a simple arithmetic expression safely.
+def _message_text(message: Any) -> str:
+    if isinstance(message, dict):
+        content = message.get("content", "")
+    else:
+        content = getattr(message, "content", "")
 
-    Supported operators: +, -, *, /, %, ** and parentheses.
-    """
-    parsed = ast.parse(expression, mode="eval")
-    allowed_nodes = (
-        ast.Expression,
-        ast.BinOp,
-        ast.UnaryOp,
-        ast.Constant,
-        ast.Add,
-        ast.Sub,
-        ast.Mult,
-        ast.Div,
-        ast.Mod,
-        ast.Pow,
-        ast.USub,
-        ast.UAdd,
-        ast.Load,
-    )
-
-    for node in ast.walk(parsed):
-        if not isinstance(node, allowed_nodes):
-            raise ValueError("Expression contains unsupported syntax")
-
-    result: Any = eval(compile(parsed, "<calculator>", "eval"), {"__builtins__": {}}, {})
-    return str(result)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text", "")))
+            else:
+                parts.append(str(item))
+        return "\n".join(part for part in parts if part)
+    return str(content)
 
 
-graph = create_agent(
-    model=DEFAULT_MODEL,
-    tools=[utc_now, calculator],
-    system_prompt=(
-        "You are a concise assistant. "
-        "Use tools when they add factual precision, then return a direct answer."
-    ),
-    name="simple_agent",
-)
+def _last_user_message(messages: list[Any]) -> str:
+    for message in reversed(messages):
+        if isinstance(message, dict):
+            if message.get("role") == "user":
+                return _message_text(message)
+            continue
+
+        if getattr(message, "type", "") == "human":
+            return _message_text(message)
+    return ""
+
+
+def analyze_request(state: MessagesState) -> dict[str, list[AIMessage]]:
+    user_input = _last_user_message(state["messages"]).strip()
+    if not user_input:
+        response = "请输入包含沪深京个股代码的请求，例如：请分析 600519 的基本面。"
+    else:
+        response = generate_cn_stock_fundamental_report.invoke({"user_input": user_input})
+    return {"messages": [AIMessage(content=response)]}
+
+
+builder = StateGraph(MessagesState)
+builder.add_node("analyze_request", analyze_request)
+builder.add_edge(START, "analyze_request")
+builder.add_edge("analyze_request", END)
+
+graph = builder.compile()
