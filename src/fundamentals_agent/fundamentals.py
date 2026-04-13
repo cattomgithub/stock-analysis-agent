@@ -18,15 +18,19 @@ from langchain_core.tools import tool
 load_dotenv()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MX_SKILLS_DIR = Path(
-    os.getenv("EASTMONEY_MX_SKILLS_DIR", str(REPO_ROOT.parent / "eastmoney-mx-skills"))
-)
-MX_DATA_MODULE_PATH = Path(
-    os.getenv(
-        "EASTMONEY_MX_DATA_PATH",
-        str(DEFAULT_MX_SKILLS_DIR / "mx-data" / "mx_data.py"),
-    )
-)
+DEFAULT_MX_SKILLS_DIR = REPO_ROOT / "eastmoney-mx-skills"
+
+
+def resolve_mx_skills_dir() -> Path:
+    configured_dir = os.getenv("EASTMONEY_MX_SKILLS_DIR")
+    return Path(configured_dir) if configured_dir else DEFAULT_MX_SKILLS_DIR
+
+
+def resolve_mx_data_module_path() -> Path:
+    configured_path = os.getenv("EASTMONEY_MX_DATA_PATH")
+    if configured_path:
+        return Path(configured_path)
+    return resolve_mx_skills_dir() / "mx-data" / "mx_data.py"
 
 REPORT_QUERY_BUNDLES: tuple[tuple[str, str], ...] = (
     ("公司概况", "公司简介 主营业务 成立时间 董事长 总股本"),
@@ -116,12 +120,13 @@ def _load_module(module_path: Path) -> Any:
 
 @lru_cache(maxsize=1)
 def load_mx_data_class() -> type[Any]:
-    if not MX_DATA_MODULE_PATH.is_file():
+    module_path = resolve_mx_data_module_path()
+    if not module_path.is_file():
         raise FileNotFoundError(
-            f"未找到东方财富妙想 mx-data 模块: {MX_DATA_MODULE_PATH}"
+            f"未找到东方财富妙想 mx-data 模块: {module_path}"
         )
     try:
-        module = _load_module(MX_DATA_MODULE_PATH)
+        module = _load_module(module_path)
     except ModuleNotFoundError as exc:
         missing = exc.name or "未知依赖"
         raise RuntimeError(

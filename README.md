@@ -84,7 +84,7 @@ PowerShell:
 
 ```powershell
 $env:MX_APIKEY="your_api_key_here"
-$env:EASTMONEY_MX_SKILLS_DIR="../eastmoney-mx-skills"
+$env:EASTMONEY_MX_SKILLS_DIR="./eastmoney-mx-skills"
 $env:STOCK_ANALYSIS_REPORT_DIR="./reports"
 $env:STOCK_ANALYSIS_LLM_PROVIDER="openai"
 $env:OPENAI_API_BASE_URL="https://api.openai.com/v1"
@@ -101,7 +101,7 @@ Bash:
 
 ```bash
 export MX_APIKEY=your_api_key_here
-export EASTMONEY_MX_SKILLS_DIR=../eastmoney-mx-skills
+export EASTMONEY_MX_SKILLS_DIR=./eastmoney-mx-skills
 export STOCK_ANALYSIS_REPORT_DIR=./reports
 export STOCK_ANALYSIS_LLM_PROVIDER=openai
 export OPENAI_API_BASE_URL=https://api.openai.com/v1
@@ -143,6 +143,8 @@ print(result["messages"][-1].content)
 ```
 
 运行后会在 `STOCK_ANALYSIS_REPORT_DIR` 指定目录生成 markdown 文件，默认输出到项目根目录下的 `reports/`。该目录用于保存生成结果，默认不纳入版本控制。
+
+东方财富妙想 skill 默认直接读取项目内子模块 `./eastmoney-mx-skills`；只有你想覆盖默认位置时，才需要额外设置 `EASTMONEY_MX_SKILLS_DIR` 或 `EASTMONEY_MX_DATA_PATH`。
 
 如果已配置 `STOCK_ANALYSIS_LLM_PROVIDER` 以及对应的 `API_BASE_URL`、`API_KEY`、`MODEL` 变量，agent 会在生成 Markdown 报告后调用 OpenAI 或智谱模型，给出一段中文总结；未配置时会退回到基础结果输出。
 
