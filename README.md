@@ -64,73 +64,9 @@
 - [ ] 技术面 Agent 最小实现
 - [ ] 消息面 Agent 最小实现
 
-## Quickstart
+## 用例
 
-1. Sync the project with `uv`:
-
-```bash
-uv sync --dev
-```
-
-Upgrade dependencies and refresh the lockfile when needed:
-
-```bash
-uv sync --dev -U
-```
-
-2. Configure environment variables:
-
-PowerShell:
-
-```powershell
-$env:MX_APIKEY="your_api_key_here"
-$env:EASTMONEY_MX_SKILLS_DIR="./eastmoney-mx-skills"
-$env:STOCK_ANALYSIS_REPORT_DIR="./reports"
-$env:STOCK_ANALYSIS_LLM_PROVIDER="openai"
-$env:OPENAI_API_BASE_URL="https://api.openai.com/v1"
-$env:OPENAI_API_KEY="your_openai_key"
-$env:OPENAI_MODEL="gpt-4.1-mini"
-# 使用智谱时改成 zhipu，并设置下面三项
-# $env:STOCK_ANALYSIS_LLM_PROVIDER="zhipu"
-# $env:ZHIPU_API_BASE_URL="https://open.bigmodel.cn/api/paas/v4/"
-# $env:ZHIPU_API_KEY="your_zhipu_key"
-# $env:ZHIPU_MODEL="glm-4.5-air"
-```
-
-Bash:
-
-```bash
-export MX_APIKEY=your_api_key_here
-export EASTMONEY_MX_SKILLS_DIR=./eastmoney-mx-skills
-export STOCK_ANALYSIS_REPORT_DIR=./reports
-export STOCK_ANALYSIS_LLM_PROVIDER=openai
-export OPENAI_API_BASE_URL=https://api.openai.com/v1
-export OPENAI_API_KEY=your_openai_key
-export OPENAI_MODEL=gpt-4.1-mini
-# 使用智谱时改成 zhipu，并设置下面三项
-# export STOCK_ANALYSIS_LLM_PROVIDER=zhipu
-# export ZHIPU_API_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
-# export ZHIPU_API_KEY=your_zhipu_key
-# export ZHIPU_MODEL=glm-4.5-air
-```
-
-3. Run locally:
-
-```bash
-uv run langgraph dev
-```
-
-Optional `make` wrappers on systems with GNU Make:
-
-```bash
-make dev
-make upgrade
-make run
-```
-
-## Usage
-
-向 graph 传入包含沪深京个股代码的用户请求，例如：
+向 `graph` 传入包含沪深京个股代码的请求，例如: 
 
 ```python
 from fundamentals_agent.graph import graph
@@ -148,54 +84,13 @@ print(result["messages"][-1].content)
 
 如果已配置 `STOCK_ANALYSIS_LLM_PROVIDER` 以及对应的 `API_BASE_URL`、`API_KEY`、`MODEL` 变量，agent 会在生成 Markdown 报告后调用 OpenAI 或智谱模型，给出一段中文总结；未配置时会退回到基础结果输出。
 
-## Tests and lint
+## 测试
 
-```bash
-make unit-tests
-make integration-tests
-make llm-tests
-make test
-make lint
-make format
-```
+- 单元测试和默认集成测试不依赖外部 LLM 或东方财富真实接口
+- 真实 LLM 集成测试依赖你在 `.env` 的 OpenAI 或智谱配置
+- 若要接入东方财富妙想接口，需要额外配置 `MX_APIKEY`
 
-### Windows
-
-PowerShell 下推荐按下面顺序测试：
-
-1. 仅跑本地单元测试和 mock 集成测试：
-
-```powershell
-uv sync --dev
-uv run python -m pytest tests/unit_tests -q
-uv run python -m pytest tests/integration_tests/test_graph.py -q
-```
-
-2. 跑真实 OpenAI 模型集成测试：
-
-```powershell
-$env:STOCK_ANALYSIS_LLM_PROVIDER="openai"
-$env:OPENAI_API_BASE_URL="https://api.openai.com/v1"
-$env:OPENAI_API_KEY="your_openai_key"
-$env:OPENAI_MODEL="gpt-4.1-mini"
-uv run python -m pytest tests/integration_tests/test_live_llm.py -q -m external_llm
-```
-
-3. 跑真实智谱模型集成测试：
-
-```powershell
-$env:STOCK_ANALYSIS_LLM_PROVIDER="zhipu"
-$env:ZHIPU_API_BASE_URL="https://open.bigmodel.cn/api/paas/v4/"
-$env:ZHIPU_API_KEY="your_zhipu_key"
-$env:ZHIPU_MODEL="glm-4.5-air"
-uv run python -m pytest tests/integration_tests/test_live_llm.py -q -m external_llm
-```
-
-### macOS
-
-在 zsh 或 bash 下可以直接执行：
-
-1. 仅跑本地单元测试和 mock 集成测试：
+1. 运行本地单元测试和 mock 集成测试:
 
 ```bash
 uv sync --dev
@@ -203,29 +98,11 @@ uv run python -m pytest tests/unit_tests -q
 uv run python -m pytest tests/integration_tests/test_graph.py -q
 ```
 
-2. 跑真实 OpenAI 模型集成测试：
+2. 运行大语言模型集成测试: 
 
 ```bash
-export STOCK_ANALYSIS_LLM_PROVIDER=openai
-export OPENAI_API_BASE_URL=https://api.openai.com/v1
-export OPENAI_API_KEY=your_openai_key
-export OPENAI_MODEL=gpt-4.1-mini
 uv run python -m pytest tests/integration_tests/test_live_llm.py -q -m external_llm
 ```
-
-3. 跑真实智谱模型集成测试：
-
-```bash
-export STOCK_ANALYSIS_LLM_PROVIDER=zhipu
-export ZHIPU_API_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
-export ZHIPU_API_KEY=your_zhipu_key
-export ZHIPU_MODEL=glm-4.5-air
-uv run python -m pytest tests/integration_tests/test_live_llm.py -q -m external_llm
-```
-
-单元测试和默认集成测试不依赖外部 LLM 或东方财富真实接口；真实 LLM 集成测试只依赖你选择的 OpenAI 或智谱配置。若要接入真实东方财富妙想接口，再额外配置 `MX_APIKEY`。
-
-所有 pytest 测试流程现在都会输出 DEBUG 级别日志。涉及 Markdown 报告生成的测试，会把产物稳定写入项目内的 `reports/test-artifacts/` 对应测试目录，而不是 pytest 的临时目录，便于在 macOS 和 Windows 下直接复查 `fundamentals_*.md`。
 
 ## Reference docs
 
