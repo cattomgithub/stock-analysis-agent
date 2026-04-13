@@ -7,7 +7,7 @@ from typing import Any
 from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 
-from simple_agent.fundamentals import generate_cn_stock_fundamental_report
+from .fundamentals import generate_cn_stock_fundamental_report
 
 
 def _message_text(message: Any) -> str:

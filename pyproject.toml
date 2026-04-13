@@ -25,5 +25,5 @@ dev = [
 ]
 
 [tool.uv.build-backend]
-module-name = "simple_agent"
+module-name = "fundamentals_agent"
 source-include = ["langgraph.json", ".env.example", "Makefile", "tests/**"]

@@ -1,9 +1,10 @@
-.PHONY: help install dev run test integration-tests lint format
+.PHONY: help install dev upgrade run test integration-tests lint format
 
 help:
 	@echo 'Targets:'
 	@echo '  install             Sync runtime dependencies with uv'
 	@echo '  dev                 Sync project + dev dependencies with uv'
+	@echo '  upgrade             Upgrade and resync project dependencies with uv'
 	@echo '  run                 Start the local LangGraph dev server'
 	@echo '  test                Run unit tests'
 	@echo '  integration-tests   Run integration tests'
@@ -14,7 +15,10 @@ install:
 	uv sync --no-dev
 
 dev:
-	uv sync
+	uv sync --dev
+
+upgrade:
+	uv sync --dev -U
 
 run:
 	uv run langgraph dev

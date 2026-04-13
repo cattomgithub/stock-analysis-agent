@@ -135,7 +135,7 @@ def load_mx_data_class() -> type[Any]:
 
 
 def create_mx_data_client(api_key: str | None = None) -> Any:
-    return load_mx_data_class()(api_key=api_key)
+    return load_mx_data_class()(api_key=api_key or os.getenv("MX_APIKEY"))
 
 
 def extract_entity_label(result: dict[str, Any], fallback_symbol: str) -> str:
@@ -291,7 +291,7 @@ def render_markdown_report(user_input: str, reports: list[StockReport]) -> str:
 
 
 def write_markdown_report(
-    user_input: str,
+    markdown_text: str,
     reports: list[StockReport],
     output_dir: str | None = None,
 ) -> Path:
@@ -301,14 +301,11 @@ def write_markdown_report(
     if len(reports) > 3:
         code_segment = f"{code_segment}_{len(reports)}stocks"
     file_path = report_dir / f"fundamentals_{code_segment}_{timestamp}.md"
-    file_path.write_text(render_markdown_report(user_input, reports), encoding="utf-8")
+    file_path.write_text(markdown_text, encoding="utf-8")
     return file_path
 
 
-def build_fundamental_report(
-    user_input: str,
-    output_dir: str | None = None,
-) -> tuple[Path, list[StockTarget], str]:
+def collect_reports_from_input(user_input: str) -> tuple[list[StockTarget], list[StockReport]]:
     targets = extract_cn_stock_targets(user_input)
     if not targets:
         raise ValueError(
@@ -317,8 +314,16 @@ def build_fundamental_report(
 
     client = create_mx_data_client()
     reports = [collect_stock_report(client, target) for target in targets]
+    return targets, reports
+
+
+def build_fundamental_report(
+    user_input: str,
+    output_dir: str | None = None,
+) -> tuple[Path, list[StockTarget], str]:
+    targets, reports = collect_reports_from_input(user_input)
     markdown_text = render_markdown_report(user_input, reports)
-    report_path = write_markdown_report(user_input, reports, output_dir)
+    report_path = write_markdown_report(markdown_text, reports, output_dir)
     return report_path, targets, markdown_text
 
 
@@ -356,6 +361,7 @@ def generate_cn_stock_fundamental_report(
 __all__ = [
     "StockTarget",
     "build_fundamental_report",
+    "collect_reports_from_input",
     "create_mx_data_client",
     "detect_cn_stock_codes",
     "extract_cn_stock_targets",

@@ -72,7 +72,23 @@
 uv sync --dev
 ```
 
+Upgrade dependencies and refresh the lockfile when needed:
+
+```bash
+uv sync --dev -U
+```
+
 2. Configure environment variables:
+
+PowerShell:
+
+```powershell
+$env:MX_APIKEY="your_api_key_here"
+$env:EASTMONEY_MX_SKILLS_DIR="../eastmoney-mx-skills"
+$env:STOCK_ANALYSIS_REPORT_DIR="./reports"
+```
+
+Bash:
 
 ```bash
 export MX_APIKEY=your_api_key_here
@@ -86,10 +102,11 @@ export STOCK_ANALYSIS_REPORT_DIR=./reports
 uv run langgraph dev
 ```
 
-Optional `make` wrappers:
+Optional `make` wrappers on systems with GNU Make:
 
 ```bash
 make dev
+make upgrade
 make run
 ```
 
@@ -98,7 +115,7 @@ make run
 向 graph 传入包含沪深京个股代码的用户请求，例如：
 
 ```python
-from simple_agent.graph import graph
+from fundamentals_agent.graph import graph
 
 result = graph.invoke(
     {"messages": [{"role": "user", "content": "请分析 600519 的基本面"}]}
@@ -107,7 +124,7 @@ result = graph.invoke(
 print(result["messages"][-1].content)
 ```
 
-运行后会在 `STOCK_ANALYSIS_REPORT_DIR` 指定目录生成 markdown 文件，默认输出到项目根目录下的 `reports/`。
+运行后会在 `STOCK_ANALYSIS_REPORT_DIR` 指定目录生成 markdown 文件，默认输出到项目根目录下的 `reports/`。该目录用于保存生成结果，默认不纳入版本控制。
 
 ## Tests and lint
 
