@@ -1,7 +1,7 @@
 [project]
-name = "simple-agent-template"
-version = "0.1.0"
-description = "Minimal LangChain agent template for LangSmith/LangGraph deployment"
+name = "stock-analysis-agent"
+version = "0.0.1"
+description = "Stock Analysis Agent using LangGraph"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
