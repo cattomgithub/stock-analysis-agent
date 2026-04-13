@@ -6,10 +6,11 @@ from typing import Any
 import pytest
 import requests
 
-from fundamentals_agent.llm_clients import (
+from external_llm import (
     ChatMessage,
     create_openai_client,
     create_zhipu_client,
+    load_llm_provider,
     load_llm_settings,
 )
 
@@ -59,6 +60,19 @@ def test_load_llm_settings_validates_required_fields() -> None:
 
     with pytest.raises(ValueError, match="ZHIPU_MODEL"):
         load_llm_settings("zhipu", env={"ZHIPU_API_KEY": "secret"})
+
+
+def test_load_llm_provider_supports_custom_env_key() -> None:
+    assert (
+        load_llm_provider(
+            "FUNDAMENTALS_LLM_PROVIDER",
+            env={"FUNDAMENTALS_LLM_PROVIDER": "OpenAI"},
+        )
+        == "openai"
+    )
+
+    with pytest.raises(ValueError, match="CUSTOM_LLM_PROVIDER"):
+        load_llm_provider("CUSTOM_LLM_PROVIDER", env={})
 
 
 @pytest.mark.parametrize(

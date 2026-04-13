@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import json
-import os
 import re
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from .llm_clients import LLMResponse, create_llm_client
+from external_llm import LLMProvider, LLMResponse, create_llm_client, load_llm_provider
 
 if TYPE_CHECKING:
     from .fundamentals import StockReport
 
-_SUPPORTED_PROVIDERS = ("openai", "zhipu")
 _MARKDOWN_FENCE_PATTERN = re.compile(
     r"^```(?:markdown|md)?\s*(?P<body>.*)\s*```$",
     re.IGNORECASE | re.DOTALL,
@@ -31,16 +29,10 @@ FORMATTER_SYSTEM_PROMPT = """你是一名严谨的中文股票基本面整理助
 6. 不要输出免责声明，不要要求用户补充信息。"""
 
 
-def load_fundamentals_llm_provider(env: Mapping[str, str] | None = None) -> str:
-    env_map = os.environ if env is None else env
-    provider_text = str(env_map.get("FUNDAMENTALS_LLM_PROVIDER", "")).strip().lower()
-    if not provider_text:
-        raise ValueError(
-            "缺少 FUNDAMENTALS_LLM_PROVIDER 配置，请设置为 openai 或 zhipu。"
-        )
-    if provider_text not in _SUPPORTED_PROVIDERS:
-        raise ValueError("FUNDAMENTALS_LLM_PROVIDER 仅支持 openai 或 zhipu。")
-    return cast(str, provider_text)
+def load_fundamentals_llm_provider(
+    env: Mapping[str, str] | None = None,
+) -> LLMProvider:
+    return load_llm_provider("FUNDAMENTALS_LLM_PROVIDER", env=env)
 
 
 def _serialize_reports_for_llm(reports: list[StockReport]) -> list[dict[str, Any]]:

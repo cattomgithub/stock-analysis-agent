@@ -1,4 +1,4 @@
-"""Optional external LLM clients for OpenAI and Zhipu."""
+"""Reusable external LLM clients for OpenAI and Zhipu."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import logging
 import os
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from dotenv import load_dotenv
 import requests
@@ -16,6 +16,8 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 LLMProvider = Literal["openai", "zhipu"]
+
+_SUPPORTED_PROVIDERS: tuple[LLMProvider, ...] = ("openai", "zhipu")
 
 _ENV_PREFIXES: dict[LLMProvider, str] = {
     "openai": "OPENAI",
@@ -63,6 +65,27 @@ class LLMResponse:
     content: str
     usage: dict[str, Any]
     raw_response: dict[str, Any]
+
+
+def normalize_llm_provider(
+    provider: str,
+    *,
+    env_key: str = "LLM_PROVIDER",
+) -> LLMProvider:
+    normalized = provider.strip().lower()
+    if not normalized:
+        raise ValueError(f"缺少 {env_key} 配置，请设置为 openai 或 zhipu。")
+    if normalized not in _SUPPORTED_PROVIDERS:
+        raise ValueError(f"{env_key} 仅支持 openai 或 zhipu。")
+    return cast(LLMProvider, normalized)
+
+
+def load_llm_provider(
+    env_key: str = "LLM_PROVIDER",
+    env: Mapping[str, str] | None = None,
+) -> LLMProvider:
+    env_map = os.environ if env is None else env
+    return normalize_llm_provider(str(env_map.get(env_key, "")), env_key=env_key)
 
 
 def _get_env_prefix(provider: LLMProvider) -> str:
@@ -277,10 +300,13 @@ def create_zhipu_client(
 __all__ = [
     "ChatCompletionsClient",
     "ChatMessage",
+    "LLMProvider",
     "LLMResponse",
     "LLMSettings",
     "create_llm_client",
     "create_openai_client",
     "create_zhipu_client",
+    "load_llm_provider",
     "load_llm_settings",
+    "normalize_llm_provider",
 ]

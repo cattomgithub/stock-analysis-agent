@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from fundamentals_agent.llm_clients import LLMResponse
+from external_llm import LLMResponse
 
 LOGGER = logging.getLogger("tests")
 REPO_ROOT = Path(__file__).resolve().parents[1]
