@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Literal, cast
@@ -10,6 +11,8 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 LLMProvider = Literal["openai", "zhipu"]
 
@@ -46,6 +49,7 @@ def _clean_env(value: str | None) -> str | None:
 def resolve_llm_provider(provider: str | None = None) -> LLMProvider:
     selected = _clean_env(provider) or _clean_env(os.getenv("STOCK_ANALYSIS_LLM_PROVIDER"))
     if selected is None:
+        logger.debug("No explicit LLM provider configured, using default provider %s", DEFAULT_PROVIDER)
         return DEFAULT_PROVIDER
 
     normalized = selected.lower()
@@ -54,6 +58,7 @@ def resolve_llm_provider(provider: str | None = None) -> LLMProvider:
         raise ValueError(
             f"不支持的 LLM 提供方: {selected}。请使用以下之一: {supported}。"
         )
+    logger.debug("Resolved LLM provider: %s", normalized)
     return cast(LLMProvider, normalized)
 
 
@@ -65,7 +70,7 @@ def get_llm_settings(provider: str | None = None) -> LLMSettings:
     if api_key is None:
         raise ValueError(f"缺少环境变量 {prefix}_API_KEY。")
 
-    return LLMSettings(
+    settings = LLMSettings(
         provider=resolved_provider,
         api_base_url=_clean_env(os.getenv(f"{prefix}_API_BASE_URL"))
         or DEFAULT_BASE_URLS[resolved_provider],
@@ -73,6 +78,13 @@ def get_llm_settings(provider: str | None = None) -> LLMSettings:
         model=_clean_env(os.getenv(f"{prefix}_MODEL"))
         or DEFAULT_MODELS[resolved_provider],
     )
+    logger.debug(
+        "Loaded LLM settings provider=%s model=%s base_url=%s",
+        settings.provider,
+        settings.model,
+        settings.api_base_url,
+    )
+    return settings
 
 
 def is_llm_configured(provider: str | None = None) -> bool:

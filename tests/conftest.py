@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+import re
+import shutil
 from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage
 
 from fundamentals_agent.llm import LLMSettings
+
+LOGGER = logging.getLogger("tests")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+TEST_ARTIFACTS_DIR = REPO_ROOT / "reports" / "test-artifacts"
 
 
 @pytest.fixture(scope="session")
@@ -18,6 +26,43 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "external_llm: tests that call a real OpenAI-compatible LLM provider",
     )
+    logging.getLogger("tests").setLevel(logging.DEBUG)
+    logging.getLogger("fundamentals_agent").setLevel(logging.DEBUG)
+    for logger_name in ("httpx", "httpcore", "openai", "asyncio"):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    LOGGER.debug("Pytest session started at root: %s", session.config.rootpath)
+    LOGGER.debug("Persistent test artifacts will be written under: %s", TEST_ARTIFACTS_DIR)
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    LOGGER.debug("START %s", item.nodeid)
+
+
+def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> None:
+    del nextitem
+    LOGGER.debug("END %s", item.nodeid)
+
+
+def _nodeid_to_path_fragment(nodeid: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_.-]+", "_", nodeid).strip("_")
+    return normalized or "test"
+
+
+@pytest.fixture
+def report_output_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> Path:
+    output_dir = TEST_ARTIFACTS_DIR / _nodeid_to_path_fragment(request.node.nodeid)
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("STOCK_ANALYSIS_REPORT_DIR", str(output_dir))
+    LOGGER.debug("STOCK_ANALYSIS_REPORT_DIR for %s -> %s", request.node.nodeid, output_dir)
+    return output_dir
 
 
 class FakeMXData:

@@ -225,6 +225,8 @@ uv run python -m pytest tests/integration_tests/test_live_llm.py -q -m external_
 
 单元测试和默认集成测试不依赖外部 LLM 或东方财富真实接口；真实 LLM 集成测试只依赖你选择的 OpenAI 或智谱配置。若要接入真实东方财富妙想接口，再额外配置 `MX_APIKEY`。
 
+所有 pytest 测试流程现在都会输出 DEBUG 级别日志。涉及 Markdown 报告生成的测试，会把产物稳定写入项目内的 `reports/test-artifacts/` 对应测试目录，而不是 pytest 的临时目录，便于在 macOS 和 Windows 下直接复查 `fundamentals_*.md`。
+
 ## Reference docs
 
 - LangChain quickstart: https://docs.langchain.com/oss/python/langchain/quickstart

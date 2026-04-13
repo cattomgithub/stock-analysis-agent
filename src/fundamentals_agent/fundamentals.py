@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -19,18 +20,25 @@ load_dotenv()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MX_SKILLS_DIR = REPO_ROOT / "eastmoney-mx-skills"
+logger = logging.getLogger(__name__)
 
 
 def resolve_mx_skills_dir() -> Path:
     configured_dir = os.getenv("EASTMONEY_MX_SKILLS_DIR")
-    return Path(configured_dir) if configured_dir else DEFAULT_MX_SKILLS_DIR
+    resolved_dir = Path(configured_dir) if configured_dir else DEFAULT_MX_SKILLS_DIR
+    logger.debug("Resolved Eastmoney MX skills directory: %s", resolved_dir)
+    return resolved_dir
 
 
 def resolve_mx_data_module_path() -> Path:
     configured_path = os.getenv("EASTMONEY_MX_DATA_PATH")
     if configured_path:
-        return Path(configured_path)
-    return resolve_mx_skills_dir() / "mx-data" / "mx_data.py"
+        module_path = Path(configured_path)
+        logger.debug("Resolved Eastmoney MX data module from env: %s", module_path)
+        return module_path
+    module_path = resolve_mx_skills_dir() / "mx-data" / "mx_data.py"
+    logger.debug("Resolved Eastmoney MX data module path: %s", module_path)
+    return module_path
 
 REPORT_QUERY_BUNDLES: tuple[tuple[str, str], ...] = (
     ("公司概况", "公司简介 主营业务 成立时间 董事长 总股本"),
@@ -167,6 +175,7 @@ def query_fundamental_section(
     suffix: str,
 ) -> tuple[SectionResult, str]:
     query_text = f"{target.symbol} {suffix}"
+    logger.debug("Querying section %s for %s with %s", title, target.symbol, query_text)
     result = client.query(query_text)
     tables, conditions, _total_rows, error = client.parse_result(result)
     return (
@@ -184,6 +193,7 @@ def query_fundamental_section(
 def collect_stock_report(client: Any, target: StockTarget) -> StockReport:
     sections: list[SectionResult] = []
     entity_label = target.symbol
+    logger.debug("Collecting report sections for %s", target.symbol)
     for title, suffix in REPORT_QUERY_BUNDLES:
         try:
             section, resolved_entity_label = query_fundamental_section(
@@ -195,6 +205,7 @@ def collect_stock_report(client: Any, target: StockTarget) -> StockReport:
             if resolved_entity_label != target.symbol:
                 entity_label = resolved_entity_label
         except Exception as exc:
+            logger.debug("Section %s failed for %s: %s", title, target.symbol, exc)
             section = SectionResult(
                 title=title,
                 query_text=f"{target.symbol} {suffix}",
@@ -211,6 +222,7 @@ def resolve_report_dir(output_dir: str | None = None) -> Path:
         os.getenv("STOCK_ANALYSIS_REPORT_DIR", str(REPO_ROOT / "reports"))
     )
     report_dir.mkdir(parents=True, exist_ok=True)
+    logger.debug("Resolved report output directory: %s", report_dir)
     return report_dir
 
 
@@ -307,11 +319,13 @@ def write_markdown_report(
         code_segment = f"{code_segment}_{len(reports)}stocks"
     file_path = report_dir / f"fundamentals_{code_segment}_{timestamp}.md"
     file_path.write_text(markdown_text, encoding="utf-8")
+    logger.debug("Wrote markdown report to %s", file_path)
     return file_path
 
 
 def collect_reports_from_input(user_input: str) -> tuple[list[StockTarget], list[StockReport]]:
     targets = extract_cn_stock_targets(user_input)
+    logger.debug("Extracted stock targets from input %r: %s", user_input, [target.symbol for target in targets])
     if not targets:
         raise ValueError(
             "未检测到沪深京个股代码，请提供 6 位个股代码，例如 600519、000001 或 430047。"
@@ -326,9 +340,11 @@ def build_fundamental_report(
     user_input: str,
     output_dir: str | None = None,
 ) -> tuple[Path, list[StockTarget], str]:
+    logger.debug("Building fundamental report for input: %s", user_input)
     targets, reports = collect_reports_from_input(user_input)
     markdown_text = render_markdown_report(user_input, reports)
     report_path = write_markdown_report(markdown_text, reports, output_dir)
+    logger.debug("Finished report generation at %s", report_path)
     return report_path, targets, markdown_text
 
 

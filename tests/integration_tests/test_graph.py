@@ -1,25 +1,29 @@
+import logging
+
 import pytest
 
 from fundamentals_agent.graph import graph
 
 pytestmark = pytest.mark.anyio
 
+logger = logging.getLogger(__name__)
+
 
 async def test_graph_generates_markdown_report(
-    monkeypatch: pytest.MonkeyPatch,
     patch_fake_mx_data_client,
     patch_fake_chat_model,
-    tmp_path,
+    report_output_dir,
 ) -> None:
-    monkeypatch.setenv("STOCK_ANALYSIS_REPORT_DIR", str(tmp_path))
-
     result = await graph.ainvoke(
         {"messages": [{"role": "user", "content": "请分析 600519 的基本面"}]}
     )
 
     output_text = str(result["messages"][-1].content)
+    report_files = sorted(report_output_dir.glob("fundamentals_*.md"))
+    logger.debug("Mock integration output: %s", output_text)
+    logger.debug("Mock integration report files: %s", [str(path) for path in report_files])
     assert "600519.SH" in output_text
     assert "模型总结" in output_text
     assert "LLM 提供方：openai" in output_text
     assert "Markdown 报告" in output_text
-    assert list(tmp_path.glob("fundamentals_*.md"))
+    assert report_files

@@ -1,4 +1,5 @@
 import json
+import logging
 
 from fundamentals_agent.fundamentals import (
     build_fundamental_report,
@@ -6,6 +7,8 @@ from fundamentals_agent.fundamentals import (
     extract_cn_stock_targets,
 )
 from fundamentals_agent.graph import graph
+
+logger = logging.getLogger(__name__)
 
 
 def test_graph_compiles() -> None:
@@ -33,12 +36,13 @@ def test_detect_cn_stock_codes_tool() -> None:
 
 def test_build_fundamental_report_writes_markdown(
     patch_fake_mx_data_client,
-    tmp_path,
+    report_output_dir,
 ) -> None:
     report_path, targets, markdown_text = build_fundamental_report(
         "请分析 600519 的基本面",
-        output_dir=str(tmp_path),
+        output_dir=str(report_output_dir),
     )
+    logger.debug("Generated report path in unit test: %s", report_path)
 
     assert report_path.exists()
     assert [target.symbol for target in targets] == ["600519.SH"]
