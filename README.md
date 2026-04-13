@@ -64,6 +64,14 @@
 - [ ] 技术面 Agent 最小实现
 - [ ] 消息面 Agent 最小实现
 
+## 当前运行逻辑
+
+1. 用户输入包含沪深京市场个股代码的请求
+2. agent 从用户输入中提取沪深京市场个股代码
+3. agent 使用提取出的个股代码调用东方财富妙想 mx-data skill，查询个股基本面相关数据
+4. agent 将查询结果整理并写入 Markdown 文件
+5. agent 返回“个股基本面信息收集完成”的结果提示
+
 ## 用例
 
 向 `graph` 传入包含沪深京个股代码的请求，例如: 
@@ -82,12 +90,12 @@ print(result["messages"][-1].content)
 
 东方财富妙想 skill 默认直接读取项目内子模块 `./eastmoney-mx-skills`；只有你想覆盖默认位置时，才需要额外设置 `EASTMONEY_MX_SKILLS_DIR` 或 `EASTMONEY_MX_DATA_PATH`。
 
-如果已配置 `STOCK_ANALYSIS_LLM_PROVIDER` 以及对应的 `API_BASE_URL`、`API_KEY`、`MODEL` 变量，agent 会在生成 Markdown 报告后调用 OpenAI 或智谱模型，给出一段中文总结；未配置时会退回到基础结果输出。
+当前实现不依赖外部 LLM。主流程只围绕“识别个股代码 -> 调用东方财富妙想 skill -> 写入 Markdown -> 返回完成提示”执行，避免把总结类能力混入基本面信息收集链路。
 
 ## 测试
 
-- 单元测试和默认集成测试不依赖外部 LLM 或东方财富真实接口
-- 真实 LLM 集成测试依赖你在 `.env` 的 OpenAI 或智谱配置
+- 单元测试和集成测试均不依赖外部 LLM
+- 默认测试通过 fake mx-data client 验证“识别代码 -> 查询 -> 写 Markdown -> 返回完成提示”的完整链路
 - 若要接入东方财富妙想接口，需要额外配置 `MX_APIKEY`
 
 1. 运行本地单元测试和 mock 集成测试:
@@ -96,12 +104,6 @@ print(result["messages"][-1].content)
 uv sync --dev
 uv run python -m pytest tests/unit_tests -q
 uv run python -m pytest tests/integration_tests/test_graph.py -q
-```
-
-2. 运行大语言模型集成测试: 
-
-```bash
-uv run python -m pytest tests/integration_tests/test_live_llm.py -q -m external_llm
 ```
 
 ## Reference docs

@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 async def test_graph_generates_markdown_report(
     patch_fake_mx_data_client,
-    patch_fake_chat_model,
     report_output_dir,
 ) -> None:
     result = await graph.ainvoke(
@@ -23,7 +22,7 @@ async def test_graph_generates_markdown_report(
     logger.debug("Mock integration output: %s", output_text)
     logger.debug("Mock integration report files: %s", [str(path) for path in report_files])
     assert "600519.SH" in output_text
-    assert "模型总结" in output_text
-    assert "LLM 提供方：openai" in output_text
+    assert "已调用东方财富妙想 mx-data skill 完成个股基本面查询。" in output_text
+    assert "个股基本面信息收集完成。" in output_text
     assert "Markdown 报告" in output_text
     assert report_files

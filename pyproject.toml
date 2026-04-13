@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "langchain>=1.0.0",
-    "langchain-openai>=1.0.0",
     "langgraph>=1.0.0",
     "pandas>=2.2.3",
     "python-dotenv>=1.0.1",
@@ -30,9 +29,6 @@ module-name = "fundamentals_agent"
 source-include = ["langgraph.json", ".env.example", "Makefile", "tests/**"]
 
 [tool.pytest.ini_options]
-markers = [
-    "external_llm: tests that call a real OpenAI-compatible LLM provider",
-]
 addopts = "-ra"
 log_cli = true
 log_cli_level = "DEBUG"

@@ -323,6 +323,18 @@ def write_markdown_report(
     return file_path
 
 
+def render_completion_message(report_path: Path, targets: list[StockTarget]) -> str:
+    resolved = "、".join(target.symbol for target in targets)
+    return "\n".join(
+        [
+            f"已识别股票代码：{resolved}",
+            "已调用东方财富妙想 mx-data skill 完成个股基本面查询。",
+            f"已生成 Markdown 报告：{report_path}",
+            "个股基本面信息收集完成。",
+        ]
+    )
+
+
 def collect_reports_from_input(user_input: str) -> tuple[list[StockTarget], list[StockReport]]:
     targets = extract_cn_stock_targets(user_input)
     logger.debug("Extracted stock targets from input %r: %s", user_input, [target.symbol for target in targets])
@@ -372,11 +384,7 @@ def generate_cn_stock_fundamental_report(
     except Exception as exc:
         return f"生成基本面报告失败：{exc}"
 
-    resolved = "、".join(target.symbol for target in targets)
-    return (
-        f"已识别股票代码：{resolved}\n"
-        f"已生成 Markdown 报告：{report_path}"
-    )
+    return render_completion_message(report_path, targets)
 
 
 __all__ = [
@@ -388,4 +396,5 @@ __all__ = [
     "extract_cn_stock_targets",
     "generate_cn_stock_fundamental_report",
     "render_markdown_report",
+    "render_completion_message",
 ]

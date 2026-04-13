@@ -5,6 +5,7 @@ from fundamentals_agent.fundamentals import (
     build_fundamental_report,
     detect_cn_stock_codes,
     extract_cn_stock_targets,
+    generate_cn_stock_fundamental_report,
 )
 from fundamentals_agent.graph import graph
 
@@ -48,3 +49,19 @@ def test_build_fundamental_report_writes_markdown(
     assert [target.symbol for target in targets] == ["600519.SH"]
     assert "贵州茅台" in markdown_text
     assert "高端白酒龙头" in markdown_text
+
+
+def test_generate_cn_stock_fundamental_report_returns_completion_message(
+    patch_fake_mx_data_client,
+    report_output_dir,
+) -> None:
+    result = generate_cn_stock_fundamental_report.invoke(
+        {
+            "user_input": "请分析 600519 的基本面",
+            "output_dir": str(report_output_dir),
+        }
+    )
+
+    assert "600519.SH" in result
+    assert "已调用东方财富妙想 mx-data skill 完成个股基本面查询。" in result
+    assert "个股基本面信息收集完成。" in result

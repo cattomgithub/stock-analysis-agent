@@ -7,9 +7,6 @@ import shutil
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage
-
-from fundamentals_agent.llm import LLMSettings
 
 LOGGER = logging.getLogger("tests")
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -22,10 +19,6 @@ def anyio_backend() -> str:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line(
-        "markers",
-        "external_llm: tests that call a real OpenAI-compatible LLM provider",
-    )
     logging.getLogger("tests").setLevel(logging.DEBUG)
     logging.getLogger("fundamentals_agent").setLevel(logging.DEBUG)
     for logger_name in ("httpx", "httpcore", "openai", "asyncio"):
@@ -140,42 +133,6 @@ class FakeMXData:
 @pytest.fixture
 def fake_mx_data_client() -> FakeMXData:
     return FakeMXData()
-
-
-class FakeChatModel:
-    def __init__(self, content: str = "模型总结：贵州茅台盈利能力与股东结构表现稳定，Markdown 报告已生成。") -> None:
-        self.content = content
-        self.calls: list[list[Any]] = []
-
-    def invoke(self, messages: list[Any]) -> AIMessage:
-        self.calls.append(messages)
-        return AIMessage(content=self.content)
-
-
-@pytest.fixture
-def fake_chat_model() -> FakeChatModel:
-    return FakeChatModel()
-
-
-@pytest.fixture
-def patch_fake_chat_model(
-    monkeypatch: pytest.MonkeyPatch,
-    fake_chat_model: FakeChatModel,
-) -> FakeChatModel:
-    monkeypatch.setattr(
-        "fundamentals_agent.graph.create_chat_model",
-        lambda provider=None: fake_chat_model,
-    )
-    monkeypatch.setattr(
-        "fundamentals_agent.graph.get_llm_settings",
-        lambda: LLMSettings(
-            provider="openai",
-            api_base_url="https://api.openai.com/v1",
-            api_key="test-key",
-            model="gpt-4.1-mini",
-        ),
-    )
-    return fake_chat_model
 
 
 @pytest.fixture
