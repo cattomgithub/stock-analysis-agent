@@ -1,13 +1,68 @@
-# Simple Agent Template
+# 股票分析 Agent
 
-Minimal deployment template for a LangChain agent built with `create_agent(...)`.
+## 分析对象
 
-## What this template gives you
+- 沪深京市场
+    - [ ] 个股
+    - [ ] ETF
+        - [ ] 宽基 ETF
+        - [ ] 行业 ETF
+        - [ ] 策略 ETF
+        - [ ] 海外 ETF
+        - [ ] 商品 ETF
+        - [ ] 债券 ETF
+        - [ ] 货币 ETF
+    - [ ] 可转债
+- 港股
+    - [ ] 个股
+    - [ ] ETF
+- 美股
+    - [ ] 个股
+    - [ ] ETF
 
-- A deployable LangGraph entrypoint at `src/simple_agent/graph.py`.
-- Two small tools (`utc_now`, `calculator`) for predictable local behavior.
-- `langgraph.json` configured for LangSmith/LangGraph deployment.
-- A `uv`-managed local workflow with a small `Makefile` wrapper and starter tests.
+## 分析指标
+
+- 基本面
+    - 盈利能力
+        - 每股收益 (EPS)
+        - 净利润增长率
+        - 净资产收益率 (ROE)
+    - 估值指标
+        - 市盈率 (P/E)
+        - 市净率 (P/B)
+        - 市销率 (P/S)
+    - 现金流
+        - 自由现金流 (FCF)
+        - 营业现金流量
+    - 负债情况
+        - 资产负债率
+        - 流动比率
+- 技术面
+    - MA
+    - MACD
+    - RSI
+    - KDJ
+    - BOLL
+    - 趋势线
+    - 支撑/阻力线
+    - 成交量
+        - 量价背离
+        - 放量突破
+    - K线形态
+        - 十字星
+        - 大阳线
+        - 头肩顶
+        - 双底
+- 消息面
+    - 公司公告
+    - 行业动态
+    - 政策变动
+
+## 路线图
+
+- [ ] 基本面 Agent 最小实现: 沪深京个股基本面信息收集
+- [ ] 技术面 Agent 最小实现
+- [ ] 消息面 Agent 最小实现
 
 ## Quickstart
 
@@ -46,13 +101,6 @@ make format
 ```
 
 Integration tests are skipped unless `ANTHROPIC_API_KEY` is set.
-
-## Deploy to LangSmith
-
-1. Push this template to a Git repository.
-2. In LangSmith, create a new Deployment from that repo.
-3. Set required environment variables (`ANTHROPIC_API_KEY`, optionally `LANGSMITH_API_KEY`).
-4. Deploy using `langgraph.json` defaults.
 
 ## Reference docs
 
