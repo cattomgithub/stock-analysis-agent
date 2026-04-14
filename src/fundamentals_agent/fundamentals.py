@@ -8,6 +8,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -16,7 +17,14 @@ from typing import Any
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 
-from .metrics import REPORT_QUERY_BUNDLES, filter_section_tables
+from .metrics import (
+    FREE_CASH_FLOW_FORMULA,
+    REPORT_QUERY_BUNDLES,
+    canonicalize_metric_label,
+    filter_section_tables,
+    get_metric_group,
+    is_metadata_field,
+)
 from .report_formatting import summarize_reports_with_external_llm
 
 load_dotenv()
@@ -55,11 +63,11 @@ NAME_BODY_PATTERNS: tuple[re.Pattern[str], ...] = (
         r"(?:请|帮我|麻烦|想|想要|请帮我|给我|帮忙)?"
         r"(?:分析|看看|看下|查询|研究|了解|关注|梳理|总结|介绍|评估|说明|聊聊)?"
         r"\s*(?P<body>[\u4e00-\u9fffA-Za-z0-9、，,和及与/\s]{2,48}?)"
-        r"(?:的)?(?:基本面|财务|公司概况|盈利能力|估值|资产负债|现金流|股东结构|情况|业务)"
+        r"(?:的)?(?:基本面|财务|公司概况|盈利能力|盈利指标|估值|估值指标|资产负债|现金流|现金流量|现金流量指标|财务风险|财务风险指标|股东结构|情况|业务)"
     ),
     re.compile(
         r"(?P<body>[\u4e00-\u9fffA-Za-z0-9、，,和及与/\s]{2,48}?)"
-        r"(?:这只|这家)?(?:股票|个股|公司)(?:的)?(?:基本面|财务|情况|业务|估值|盈利)?"
+        r"(?:这只|这家)?(?:股票|个股|公司)(?:的)?(?:基本面|财务|情况|业务|估值|盈利|现金流量|财务风险)?"
     ),
 )
 NAME_SPLIT_PATTERN = re.compile(r"(?:、|，|,|/|\s+|和|及|与)+")
@@ -67,7 +75,7 @@ NAME_LEADING_NOISE_PATTERN = re.compile(
     r"^(?:请|帮我|麻烦|想|想要|请帮我|给我|帮忙|分析|看看|看下|查询|研究|了解|关注|梳理|总结|介绍|评估|说明|聊聊)+"
 )
 NAME_TRAILING_NOISE_PATTERN = re.compile(
-    r"(?:的|股票|个股|公司|基本面|财务|情况|业务|估值|盈利|表现)+$"
+    r"(?:的|股票|个股|公司|基本面|财务|情况|业务|估值|盈利|表现|盈利指标|估值指标|现金流量|现金流量指标|财务风险|财务风险指标)+$"
 )
 GENERIC_NAME_TOKENS = {
     "基本面",
@@ -80,7 +88,60 @@ GENERIC_NAME_TOKENS = {
     "估值",
     "盈利",
     "表现",
+    "盈利指标",
+    "估值指标",
+    "现金流量",
+    "现金流量指标",
+    "财务风险",
+    "财务风险指标",
 }
+
+_AMOUNT_UNIT_FACTORS: dict[str, Decimal] = {
+    "": Decimal("1"),
+    "元": Decimal("1"),
+    "万": Decimal("10000"),
+    "亿": Decimal("100000000"),
+    "千": Decimal("1000"),
+    "百万": Decimal("1000000"),
+    "千万": Decimal("10000000"),
+}
+_ANNUAL_PERIOD_SKIP_TOKENS = (
+    "一季报",
+    "1季报",
+    "q1",
+    "半年报",
+    "中报",
+    "半年度",
+    "q2",
+    "三季报",
+    "q3",
+    "03-31",
+    "03/31",
+    "03.31",
+    "06-30",
+    "06/30",
+    "06.30",
+    "09-30",
+    "09/30",
+    "09.30",
+)
+_YEAR_PATTERN = re.compile(r"(?P<year>(?:19|20)\d{2})")
+_FREE_CASH_FLOW_SOURCE_LABELS = (
+    "净利润",
+    "固定资产和投资性房地产折旧",
+    "使用权资产折旧",
+    "无形资产摊销",
+    "长期待摊费用摊销",
+    "投资活动现金流出",
+)
+_FREE_CASH_FLOW_OPTIONAL_LABELS = frozenset(
+    {
+        "固定资产和投资性房地产折旧",
+        "使用权资产折旧",
+        "无形资产摊销",
+        "长期待摊费用摊销",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +168,196 @@ class StockReport:
     target: StockTarget
     entity_label: str
     sections: list[SectionResult]
+
+
+def _extract_report_year(value: Any) -> int | None:
+    match = _YEAR_PATTERN.search(str(value or ""))
+    if match is None:
+        return None
+    return int(match.group("year"))
+
+
+def _is_annual_report_period(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+
+    lowered = text.lower()
+    if any(token in lowered for token in _ANNUAL_PERIOD_SKIP_TOKENS):
+        return False
+    if "年报" in text or "年度" in text:
+        return True
+    if re.fullmatch(r"(?:19|20)\d{2}", text):
+        return True
+    return any(marker in text for marker in ("12-31", "12/31", "12.31"))
+
+
+def _normalize_amount_unit(unit: str) -> str:
+    normalized = unit.strip().replace("人民币", "").replace("港币", "").replace("港元", "")
+    normalized = normalized.replace("亿元", "亿").replace("万元", "万")
+    normalized = normalized.replace("千元", "千").replace("百万元", "百万")
+    normalized = normalized.replace("千万元", "千万")
+    return normalized
+
+
+def _parse_amount_value(value: Any) -> tuple[Decimal, str] | None:
+    text = str(value if value is not None else "").strip()
+    if not text or text in {"-", "--", "—", "N/A", "n/a", "nan"}:
+        return None
+
+    is_negative_parentheses = text.startswith("(") and text.endswith(")")
+    if is_negative_parentheses:
+        text = text[1:-1].strip()
+
+    text = (
+        text.replace(",", "")
+        .replace("，", "")
+        .replace("＋", "+")
+        .replace("－", "-")
+    )
+    match = re.match(r"^(?P<number>[+-]?\d+(?:\.\d+)?)\s*(?P<unit>.*)$", text)
+    if match is None:
+        return None
+
+    unit = _normalize_amount_unit(match.group("unit"))
+    if "%" in unit:
+        return None
+
+    try:
+        amount = Decimal(match.group("number"))
+    except InvalidOperation:
+        return None
+
+    if is_negative_parentheses:
+        amount = -amount
+
+    factor = _AMOUNT_UNIT_FACTORS.get(unit, Decimal("1"))
+    return amount * factor, unit
+
+
+def _format_amount_value(value: Decimal, preferred_units: list[str]) -> str:
+    normalized_units = [unit for unit in preferred_units if unit]
+    chosen_unit = normalized_units[0] if normalized_units and len(set(normalized_units)) == 1 else ""
+    factor = _AMOUNT_UNIT_FACTORS.get(chosen_unit, Decimal("1"))
+    display_value = value / factor
+    quantized = display_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    text = format(quantized, "f").rstrip("0").rstrip(".")
+    if text in {"", "-0"}:
+        text = "0"
+    return f"{text}{chosen_unit}"
+
+
+def _merge_section_rows(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged_rows: dict[str, dict[str, Any]] = {}
+    for table in tables:
+        fieldnames = [str(name).strip() for name in list(table.get("fieldnames") or []) if str(name).strip()]
+        rows = [row for row in list(table.get("rows") or []) if isinstance(row, dict)]
+        period_field = next((name for name in fieldnames if is_metadata_field(name)), None)
+        if period_field is None:
+            continue
+
+        for row in rows:
+            period_value = str(row.get(period_field, "")).strip()
+            if not period_value:
+                continue
+
+            merged_row = merged_rows.setdefault(period_value, {"date": period_value})
+            merged_row["date"] = period_value
+            for fieldname in fieldnames:
+                if fieldname == period_field:
+                    continue
+
+                value = row.get(fieldname, "")
+                if value in {None, ""}:
+                    continue
+
+                canonical_label = canonicalize_metric_label(fieldname) or str(fieldname).strip()
+                merged_row[canonical_label] = value
+
+    return list(merged_rows.values())
+
+
+def _retain_recent_annual_rows(rows: list[dict[str, Any]], limit: int = 5) -> list[dict[str, Any]]:
+    annual_rows = [row for row in rows if _is_annual_report_period(row.get("date", ""))]
+    sorted_rows = sorted(
+        annual_rows,
+        key=lambda row: (_extract_report_year(row.get("date", "")) or -1, str(row.get("date", ""))),
+        reverse=True,
+    )
+
+    selected_rows: list[dict[str, Any]] = []
+    seen_periods: set[int | str] = set()
+    for row in sorted_rows:
+        year = _extract_report_year(row.get("date", ""))
+        period_key: int | str = year if year is not None else str(row.get("date", "")).strip()
+        if period_key in seen_periods:
+            continue
+        seen_periods.add(period_key)
+        selected_rows.append(row)
+        if len(selected_rows) >= limit:
+            break
+    return selected_rows
+
+
+def _derive_free_cash_flow(row: dict[str, Any]) -> str:
+    components: list[Decimal] = []
+    units: list[str] = []
+    for label in _FREE_CASH_FLOW_SOURCE_LABELS:
+        parsed = _parse_amount_value(row.get(label, ""))
+        if parsed is None:
+            if label in _FREE_CASH_FLOW_OPTIONAL_LABELS:
+                components.append(Decimal("0"))
+                continue
+            return ""
+
+        amount, unit = parsed
+        components.append(amount)
+        if unit:
+            units.append(unit)
+
+    free_cash_flow = (
+        components[0]
+        + components[1]
+        + components[2]
+        + components[3]
+        + components[4]
+        - components[5]
+    )
+    return _format_amount_value(free_cash_flow, units)
+
+
+def finalize_section_tables(title: str, tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    group = get_metric_group(title)
+    if group is None:
+        return tables
+
+    merged_rows = _merge_section_rows(tables)
+    if not merged_rows:
+        return tables
+
+    final_rows = _retain_recent_annual_rows(merged_rows)
+    if title == "现金流量指标":
+        for row in final_rows:
+            row["自由现金流量"] = _derive_free_cash_flow(row)
+
+    report_labels = group.report_metric_labels()
+    normalized_rows: list[dict[str, Any]] = []
+    for row in final_rows:
+        normalized_row = {"date": row.get("date", "")}
+        for label in report_labels:
+            normalized_row[label] = row.get(label, "")
+        if any(str(normalized_row.get(label, "")).strip() for label in report_labels):
+            normalized_rows.append(normalized_row)
+
+    if not normalized_rows:
+        return []
+    return [
+        {
+            "sheet_name": title,
+            "fieldnames": ["date", *report_labels],
+            "rows": normalized_rows,
+        }
+    ]
 
 
 def _normalize_name_candidate(candidate: str) -> str:
@@ -298,7 +549,7 @@ def query_fundamental_section(
     logger.debug("Querying section %s for %s with %s", title, target.symbol, query_text)
     result = client.query(query_text)
     tables, conditions, _total_rows, error = client.parse_result(result)
-    filtered_tables = filter_section_tables(title, tables)
+    filtered_tables = finalize_section_tables(title, filter_section_tables(title, tables))
     return (
         SectionResult(
             title=title,
@@ -376,6 +627,11 @@ def render_markdown_table(fieldnames: list[str], rows: list[dict[str, Any]], max
 
 def render_section(section: SectionResult) -> str:
     lines = [f"### {section.title}", "", f"查询语句：{section.query_text}", ""]
+    if section.title == "现金流量指标":
+        lines.extend([
+            f"指标口径：自由现金流量 = {FREE_CASH_FLOW_FORMULA}",
+            "",
+        ])
     if section.error:
         lines.append(f"查询失败：{section.error}")
         return "\n".join(lines)
@@ -434,6 +690,8 @@ def render_markdown_report(
         f"- 原始输入：{user_input}",
         f"- 识别股票：{target_list}",
         "- 数据来源：东方财富妙想 skills / mx-data",
+        "- 数据范围：近五年年度财报",
+        f"- 自由现金流量口径：{FREE_CASH_FLOW_FORMULA}",
         f"- 外部 LLM：{llm_provider} / {llm_model}",
         "",
         "## 外部 LLM 整理结果",

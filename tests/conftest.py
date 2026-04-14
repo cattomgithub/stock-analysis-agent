@@ -91,6 +91,10 @@ class FakeMXData:
     def _seed(symbol: str) -> int:
         return int(symbol[:6][-2:])
 
+    @staticmethod
+    def _annual_years() -> tuple[str, ...]:
+        return ("2024", "2023", "2022", "2021", "2020")
+
     def query(self, tool_query: str) -> dict[str, Any]:
         symbol = self._extract_symbol(tool_query)
         code, market = symbol.split(".")
@@ -121,53 +125,51 @@ class FakeMXData:
         company_name = self.company_name(symbol)
         seed = self._seed(symbol)
 
-        if "每股收益" in query or "净利润增长率" in query or "净资产收益率" in query:
+        years = self._annual_years()
+
+        if "每股收益" in query or "净资产收益率" in query:
             rows = [
                 {
-                    "date": "2024",
-                    "每股收益": f"{5 + seed / 10:.2f}",
-                    "净利润增长率": f"{10 + seed % 9}.5%",
-                    "净资产收益率": f"{15 + seed % 7}.4%",
-                },
-                {
-                    "date": "2023",
-                    "每股收益": f"{4 + seed / 10:.2f}",
-                    "净利润增长率": f"{8 + seed % 7}.2%",
-                    "净资产收益率": f"{13 + seed % 6}.1%",
-                },
+                    "date": year,
+                    "每股收益": f"{5 + seed / 10 - index * 0.2:.2f}",
+                    "净资产收益率": f"{15 + seed % 7 - index}.4%",
+                }
+                for index, year in enumerate(years)
             ]
+            rows.insert(
+                1,
+                {
+                    "date": "2024-09-30",
+                    "每股收益": f"{4.8 + seed / 10:.2f}",
+                    "净资产收益率": f"{14 + seed % 7}.1%",
+                },
+            )
             return (
                 [
                     {
-                        "sheet_name": "盈利能力",
-                        "fieldnames": ["date", "每股收益", "净利润增长率", "净资产收益率"],
+                        "sheet_name": "盈利指标",
+                        "fieldnames": ["date", "每股收益", "净资产收益率"],
                         "rows": rows,
                     }
                 ],
-                [f"[{company_name}] 盈利能力", f"symbol={symbol}"],
+                [f"[{company_name}] 盈利指标", f"symbol={symbol}"],
                 len(rows),
                 None,
             )
-        if "市盈率" in query or "市净率" in query or "市销率" in query:
+        if "市盈率" in query or "市净率" in query:
             rows = [
                 {
-                    "date": "2024",
-                    "市盈率": f"{12 + seed % 8}.3",
-                    "市净率": f"{2 + seed % 5}.1",
-                    "市销率": f"{3 + seed % 4}.4",
-                },
-                {
-                    "date": "2023",
-                    "市盈率": f"{10 + seed % 7}.8",
-                    "市净率": f"{1 + seed % 4}.9",
-                    "市销率": f"{2 + seed % 3}.7",
-                },
+                    "date": year,
+                    "市盈率": f"{12 + seed % 8 - index * 0.5:.1f}",
+                    "市净率": f"{2 + seed % 5 - index * 0.1:.1f}",
+                }
+                for index, year in enumerate(years)
             ]
             return (
                 [
                     {
                         "sheet_name": "估值指标",
-                        "fieldnames": ["date", "市盈率", "市净率", "市销率"],
+                        "fieldnames": ["date", "市盈率", "市净率"],
                         "rows": rows,
                     }
                 ],
@@ -175,53 +177,59 @@ class FakeMXData:
                 len(rows),
                 None,
             )
-        if "自由现金流" in query or "经营活动产生的现金流量净额" in query:
+        if "经营活动产生的现金流量净额" in query or "投资活动现金流出小计" in query:
             rows = [
                 {
-                    "date": "2024",
-                    "经营活动现金流净额": f"{100 + seed} 亿",
-                    "自由现金流": f"{80 + seed} 亿",
-                },
-                {
-                    "date": "2023",
-                    "经营活动现金流净额": f"{90 + seed} 亿",
-                    "自由现金流": f"{70 + seed} 亿",
-                },
+                    "date": year,
+                    "净利润": f"{100 + seed - index}亿",
+                    "固定资产和投资性房地产折旧": f"{8 + index}亿",
+                    "使用权资产折旧": "3亿",
+                    "无形资产摊销": "2亿",
+                    "长期待摊费用摊销": "1亿",
+                    "投资活动现金流出小计": f"{60 + index}亿",
+                    "经营活动产生的现金流量净额": f"{120 + seed - index}亿",
+                }
+                for index, year in enumerate(years)
             ]
             return (
                 [
                     {
-                        "sheet_name": "现金流",
-                        "fieldnames": ["date", "经营活动现金流净额", "自由现金流"],
+                        "sheet_name": "现金流量指标",
+                        "fieldnames": [
+                            "date",
+                            "净利润",
+                            "固定资产和投资性房地产折旧",
+                            "使用权资产折旧",
+                            "无形资产摊销",
+                            "长期待摊费用摊销",
+                            "投资活动现金流出小计",
+                            "经营活动产生的现金流量净额",
+                        ],
                         "rows": rows,
                     }
                 ],
-                [f"[{company_name}] 现金流"],
+                [f"[{company_name}] 现金流量指标"],
                 len(rows),
                 None,
             )
 
         rows = [
             {
-                "date": "2024",
-                "资产负债率": f"{20 + seed % 15}.10%",
-                "流动比率": f"{1 + seed % 3}.8",
-            },
-            {
-                "date": "2023",
-                "资产负债率": f"{19 + seed % 12}.80%",
-                "流动比率": f"{1 + seed % 2}.6",
-            },
+                "date": year,
+                "流动比率": f"{1 + seed % 3 - index * 0.1:.1f}",
+                "资产负债率": f"{20 + seed % 15 - index}.10%",
+            }
+            for index, year in enumerate(years)
         ]
         return (
             [
                 {
-                    "sheet_name": "负债情况",
-                    "fieldnames": ["date", "资产负债率", "流动比率"],
+                    "sheet_name": "财务风险指标",
+                    "fieldnames": ["date", "流动比率", "资产负债率"],
                     "rows": rows,
                 }
             ],
-            [f"[{company_name}] 负债情况"],
+            [f"[{company_name}] 财务风险指标"],
             len(rows),
             None,
         )

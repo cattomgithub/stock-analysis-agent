@@ -81,21 +81,25 @@ def test_build_fundamental_report_writes_markdown(
         report_output_dir,
         expected_symbol="600519.SH",
         expected_name=fake_mx_data_client.company_name("600519.SH"),
-        min_table_data_rows=4,
+        min_table_data_rows=20,
     )
 
     assert validated_path == report_path
     assert_report_contains_queries(report_text, expected_queries)
     assert "## 外部 LLM 整理结果" in markdown_text
     assert "已基于东方财富 mx-data 汇总 600519.SH 的基本面数据。" in markdown_text
-    assert "### 盈利能力" in report_text
+    assert "### 盈利指标" in report_text
     assert "### 估值指标" in report_text
-    assert "### 现金流" in report_text
-    assert "### 负债情况" in report_text
+    assert "### 现金流量指标" in report_text
+    assert "### 财务风险指标" in report_text
     assert "### 公司概况" not in report_text
     assert "### 股东结构" not in report_text
     assert "营业现金流量" in report_text
+    assert "自由现金流量" in report_text
     assert "经营活动现金流净额" not in report_text
+    assert "净利润增长率" not in report_text
+    assert "市销率" not in report_text
+    assert "2024-09-30" not in report_text
 
 
 def test_build_fundamental_report_accepts_stock_name_input(
@@ -125,13 +129,32 @@ def test_build_fundamentals_formatting_prompt_uses_metric_schema_only(
     prompt = build_fundamentals_formatting_prompt("请分析 600519 的基本面", reports)
 
     assert '"metric_schema": [' in prompt
-    assert "盈利能力" in prompt
+    assert "盈利指标" in prompt
     assert "估值指标" in prompt
-    assert "现金流" in prompt
-    assert "负债情况" in prompt
+    assert "现金流量指标" in prompt
+    assert "财务风险指标" in prompt
     assert "营业现金流量" in prompt
+    assert "自由现金流量" in prompt
+    assert "近五年 年报" in prompt
+    assert "净利润+固定资产和投资性房地产折旧+使用权资产折旧+无形资产摊销+长期待摊费用摊销-投资活动现金流出" in prompt
     assert "公司概况" not in prompt
     assert "股东结构" not in prompt
+    assert "净利润增长率" not in prompt
+    assert "市销率" not in prompt
+
+
+def test_build_section_queries_use_correct_metric_scope() -> None:
+    expected_queries = dict(build_section_queries(StockTarget(code="600519", market="SH")))
+
+    assert expected_queries == {
+        "盈利指标": "600519.SH 每股收益 净资产收益率 近五年 年报",
+        "估值指标": "600519.SH 市盈率 市净率 近五年 年报",
+        "现金流量指标": (
+            "600519.SH 经营活动产生的现金流量净额 净利润 固定资产和投资性房地产折旧 "
+            "使用权资产折旧 无形资产摊销 长期待摊费用摊销 投资活动现金流出小计 近五年 年报"
+        ),
+        "财务风险指标": "600519.SH 流动比率 资产负债率 近五年 年报",
+    }
 
 
 def test_generate_cn_stock_fundamental_report_returns_completion_message(
@@ -152,7 +175,7 @@ def test_generate_cn_stock_fundamental_report_returns_completion_message(
         report_output_dir,
         expected_symbol="600519.SH",
         expected_name=fake_mx_data_client.company_name("600519.SH"),
-        min_table_data_rows=4,
+        min_table_data_rows=20,
     )
 
     assert fake_mx_data_client.query_log == list(expected_queries)
@@ -180,7 +203,7 @@ def test_graph_invokes_report_generation_with_fake_mx_client(
         report_output_dir,
         expected_symbol="600519.SH",
         expected_name=fake_mx_data_client.company_name("600519.SH"),
-        min_table_data_rows=4,
+        min_table_data_rows=20,
     )
 
     assert fake_mx_data_client.query_log == list(expected_queries)

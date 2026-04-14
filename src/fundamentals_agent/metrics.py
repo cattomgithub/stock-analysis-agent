@@ -7,12 +7,19 @@ from functools import lru_cache
 import re
 from typing import Any
 
+FREE_CASH_FLOW_FORMULA = (
+    "净利润+固定资产和投资性房地产折旧+使用权资产折旧+无形资产摊销+长期待摊费用摊销-投资活动现金流出"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class FundamentalMetric:
     label: str
     query_label: str | None = None
     aliases: tuple[str, ...] = ()
+    description: str | None = None
+    include_in_queries: bool = True
+    include_in_schema: bool = True
 
     @property
     def query_term(self) -> str:
@@ -31,21 +38,26 @@ class FundamentalMetric:
 class FundamentalMetricGroup:
     title: str
     metrics: tuple[FundamentalMetric, ...]
-    history_scope: str | None = "近三年"
+    history_scope: str | None = "近五年 年报"
 
     def query_terms(self) -> tuple[str, ...]:
-        terms = [metric.query_term for metric in self.metrics]
+        terms = [metric.query_term for metric in self.metrics if metric.include_in_queries]
         if self.history_scope:
             terms.append(self.history_scope)
         return tuple(terms)
 
+    def report_metrics(self) -> tuple[FundamentalMetric, ...]:
+        return tuple(metric for metric in self.metrics if metric.include_in_schema)
+
+    def report_metric_labels(self) -> tuple[str, ...]:
+        return tuple(metric.label for metric in self.report_metrics())
+
 
 FUNDAMENTAL_METRIC_GROUPS: tuple[FundamentalMetricGroup, ...] = (
     FundamentalMetricGroup(
-        title="盈利能力",
+        title="盈利指标",
         metrics=(
             FundamentalMetric("每股收益", aliases=("EPS",)),
-            FundamentalMetric("净利润增长率"),
             FundamentalMetric("净资产收益率", aliases=("ROE",)),
         ),
     ),
@@ -54,13 +66,17 @@ FUNDAMENTAL_METRIC_GROUPS: tuple[FundamentalMetricGroup, ...] = (
         metrics=(
             FundamentalMetric("市盈率", aliases=("PE", "P/E")),
             FundamentalMetric("市净率", aliases=("PB", "P/B")),
-            FundamentalMetric("市销率", aliases=("PS", "P/S")),
         ),
     ),
     FundamentalMetricGroup(
-        title="现金流",
+        title="现金流量指标",
         metrics=(
-            FundamentalMetric("自由现金流", aliases=("FCF",)),
+            FundamentalMetric(
+                "自由现金流量",
+                aliases=("FCF", "自由现金流"),
+                description=f"按公式计算：{FREE_CASH_FLOW_FORMULA}",
+                include_in_queries=False,
+            ),
             FundamentalMetric(
                 "营业现金流量",
                 query_label="经营活动产生的现金流量净额",
@@ -70,13 +86,44 @@ FUNDAMENTAL_METRIC_GROUPS: tuple[FundamentalMetricGroup, ...] = (
                     "经营现金流净额",
                 ),
             ),
+            FundamentalMetric(
+                "净利润",
+                aliases=(
+                    "归属于上市公司股东的净利润",
+                    "归属于母公司所有者的净利润",
+                    "归母净利润",
+                ),
+                include_in_schema=False,
+            ),
+            FundamentalMetric(
+                "固定资产和投资性房地产折旧",
+                include_in_schema=False,
+            ),
+            FundamentalMetric(
+                "使用权资产折旧",
+                include_in_schema=False,
+            ),
+            FundamentalMetric(
+                "无形资产摊销",
+                include_in_schema=False,
+            ),
+            FundamentalMetric(
+                "长期待摊费用摊销",
+                include_in_schema=False,
+            ),
+            FundamentalMetric(
+                "投资活动现金流出",
+                query_label="投资活动现金流出小计",
+                aliases=("投资活动现金流出小计", "投资活动现金流量流出小计"),
+                include_in_schema=False,
+            ),
         ),
     ),
     FundamentalMetricGroup(
-        title="负债情况",
+        title="财务风险指标",
         metrics=(
-            FundamentalMetric("资产负债率"),
             FundamentalMetric("流动比率"),
+            FundamentalMetric("资产负债率"),
         ),
     ),
 )
@@ -146,6 +193,10 @@ def canonicalize_metric_label(label: Any) -> str | None:
 
 def get_metric_group(title: str) -> FundamentalMetricGroup | None:
     return _metric_group_map().get(title)
+
+
+def is_metadata_field(fieldname: str) -> bool:
+    return _is_metadata_field(fieldname)
 
 
 def _is_metric_key_field(fieldname: str) -> bool:
@@ -259,8 +310,9 @@ def serialize_metric_schema() -> list[dict[str, Any]]:
                         for alias in metric.known_labels()
                         if alias not in {metric.label, metric.query_term}
                     ],
+                    "description": metric.description,
                 }
-                for metric in group.metrics
+                for metric in group.report_metrics()
             ],
             "history_scope": group.history_scope,
         }
@@ -269,6 +321,7 @@ def serialize_metric_schema() -> list[dict[str, Any]]:
 
 
 __all__ = [
+    "FREE_CASH_FLOW_FORMULA",
     "FUNDAMENTAL_METRIC_GROUPS",
     "REPORT_QUERY_BUNDLES",
     "FundamentalMetric",
@@ -276,5 +329,6 @@ __all__ = [
     "canonicalize_metric_label",
     "filter_section_tables",
     "get_metric_group",
+    "is_metadata_field",
     "serialize_metric_schema",
 ]
