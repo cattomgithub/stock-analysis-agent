@@ -16,6 +16,7 @@ from typing import Any
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 
+from .metrics import REPORT_QUERY_BUNDLES, filter_section_tables
 from .report_formatting import summarize_reports_with_external_llm
 
 load_dotenv()
@@ -41,19 +42,6 @@ def resolve_mx_data_module_path() -> Path:
     module_path = resolve_mx_skills_dir() / "mx-data" / "mx_data.py"
     logger.debug("Resolved Eastmoney MX data module path: %s", module_path)
     return module_path
-
-REPORT_QUERY_BUNDLES: tuple[tuple[str, str], ...] = (
-    ("公司概况", "公司简介 主营业务 成立时间 董事长 总股本"),
-    (
-        "盈利与估值",
-        "最新价 总市值 每股收益 净利润 净利润增长率 净资产收益率 市盈率 市净率 市销率 近三年",
-    ),
-    (
-        "资产与现金流",
-        "资产负债率 流动比率 毛利率 经营活动产生的现金流量净额 自由现金流 近三年",
-    ),
-    ("股东结构", "十大股东 机构持股比例"),
-)
 
 SHANGHAI_PREFIXES = ("600", "601", "603", "605", "688", "689")
 SHENZHEN_PREFIXES = ("000", "001", "002", "003", "300", "301")
@@ -310,11 +298,12 @@ def query_fundamental_section(
     logger.debug("Querying section %s for %s with %s", title, target.symbol, query_text)
     result = client.query(query_text)
     tables, conditions, _total_rows, error = client.parse_result(result)
+    filtered_tables = filter_section_tables(title, tables)
     return (
         SectionResult(
             title=title,
             query_text=query_text,
-            tables=tables,
+            tables=filtered_tables,
             conditions=conditions,
             error=error,
         ),
@@ -392,7 +381,7 @@ def render_section(section: SectionResult) -> str:
         return "\n".join(lines)
 
     if not section.tables:
-        lines.append("未返回可解析的表格数据。")
+        lines.append("未返回可解析的目标指标数据。")
         return "\n".join(lines)
 
     for table in section.tables:

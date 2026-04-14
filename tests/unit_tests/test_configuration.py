@@ -5,11 +5,13 @@ from fundamentals_agent.fundamentals import (
     StockTarget,
     build_fundamental_report,
     build_section_queries,
+    collect_reports_from_input,
     detect_cn_stock_codes,
     extract_cn_stock_name_candidates,
     extract_cn_stock_targets,
     generate_cn_stock_fundamental_report,
 )
+from fundamentals_agent.report_formatting import build_fundamentals_formatting_prompt
 from fundamentals_agent.graph import graph
 from tests.report_checks import (
     assert_generated_markdown_report,
@@ -86,7 +88,14 @@ def test_build_fundamental_report_writes_markdown(
     assert_report_contains_queries(report_text, expected_queries)
     assert "## 外部 LLM 整理结果" in markdown_text
     assert "已基于东方财富 mx-data 汇总 600519.SH 的基本面数据。" in markdown_text
-    assert "600519.SH 的主营业务测试样本" in report_text
+    assert "### 盈利能力" in report_text
+    assert "### 估值指标" in report_text
+    assert "### 现金流" in report_text
+    assert "### 负债情况" in report_text
+    assert "### 公司概况" not in report_text
+    assert "### 股东结构" not in report_text
+    assert "营业现金流量" in report_text
+    assert "经营活动现金流净额" not in report_text
 
 
 def test_build_fundamental_report_accepts_stock_name_input(
@@ -107,6 +116,22 @@ def test_build_fundamental_report_accepts_stock_name_input(
     assert fake_mx_data_client.query_log[1:] == list(expected_queries)
     assert "## 外部 LLM 整理结果" in report_text
     assert "已基于东方财富 mx-data 汇总 600519.SH 的基本面数据。" in report_text
+
+
+def test_build_fundamentals_formatting_prompt_uses_metric_schema_only(
+    patch_fake_mx_data_client,
+) -> None:
+    _targets, reports = collect_reports_from_input("请分析 600519 的基本面")
+    prompt = build_fundamentals_formatting_prompt("请分析 600519 的基本面", reports)
+
+    assert '"metric_schema": [' in prompt
+    assert "盈利能力" in prompt
+    assert "估值指标" in prompt
+    assert "现金流" in prompt
+    assert "负债情况" in prompt
+    assert "营业现金流量" in prompt
+    assert "公司概况" not in prompt
+    assert "股东结构" not in prompt
 
 
 def test_generate_cn_stock_fundamental_report_returns_completion_message(

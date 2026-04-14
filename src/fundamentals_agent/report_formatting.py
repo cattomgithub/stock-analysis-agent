@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 
 from external_llm import LLMProvider, LLMResponse, create_llm_client, load_llm_provider
 
+from .metrics import serialize_metric_schema
+
 if TYPE_CHECKING:
     from .fundamentals import StockReport
 
@@ -21,12 +23,13 @@ FORMATTER_SYSTEM_PROMPT = """你是一名严谨的中文股票基本面整理助
 你会收到东方财富妙想 mx-data 的结构化查询结果，请把它们整理成适合直接写入 Markdown 文件的内容。
 
 输出要求：
-1. 只根据给定数据整理内容，不要补充未提供的外部事实，不要编造。
+1. 只根据给定数据和 metric_schema 整理内容，不要补充未提供的外部事实，不要编造。
 2. 输出必须是 Markdown 正文，不要使用代码块围栏。
-3. 每只股票至少包含“核心结论”“财务与估值要点”“风险与关注点”三个小节。
-4. 尽量保留关键数值、同比/历史对比和股票代码。
-5. 如果某一部分数据缺失或查询失败，明确写“该部分数据不足”。
-6. 不要输出免责声明，不要要求用户补充信息。"""
+3. 只围绕四类指标组织内容：盈利能力、估值指标、现金流、负债情况；忽略公司概况、股东结构等非目标信息。
+4. 每只股票至少包含“核心结论”“分类指标分析”“风险与关注点”三个小节。
+5. 尽量保留关键数值、同比/历史对比和股票代码。
+6. 如果某一部分数据缺失或查询失败，明确写“该部分数据不足”。
+7. 不要输出免责声明，不要要求用户补充信息。"""
 
 
 def load_fundamentals_llm_provider(
@@ -70,12 +73,14 @@ def build_fundamentals_formatting_prompt(
 ) -> str:
     payload = {
         "user_input": user_input.strip(),
+        "metric_schema": serialize_metric_schema(),
         "reports": _serialize_reports_for_llm(reports),
     }
     return "\n".join(
         [
             "请根据下面 JSON 中的东方财富妙想 mx-data 查询结果，整理成适合直接写入 Markdown 文件的中文报告正文。",
-            "重点突出每只股票的公司概况、盈利与估值、资产与现金流、股东结构中的关键信息。",
+            "只允许围绕 metric_schema 中定义的基本面指标展开，严格使用四个分类：盈利能力、估值指标、现金流、负债情况。",
+            "如果原始结果里出现未在 metric_schema 中定义的字段，请忽略，不要写入正文。",
             "如果某个部分没有有效数据或查询失败，请直接说明该部分数据不足。",
             "JSON 数据如下：",
             json.dumps(payload, ensure_ascii=False, indent=2),
