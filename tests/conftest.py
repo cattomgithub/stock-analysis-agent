@@ -129,26 +129,32 @@ class FakeMXData:
 
         if "每股收益" in query or "净资产收益率" in query:
             rows = [
-                {
-                    "date": year,
-                    "每股收益": f"{5 + seed / 10 - index * 0.2:.2f}",
-                    "净资产收益率": f"{15 + seed % 7 - index}.4%",
-                }
+                {"date": year}
                 for index, year in enumerate(years)
             ]
+            for index, row in enumerate(rows):
+                if "每股收益" in query:
+                    row["每股收益"] = f"{5 + seed / 10 - index * 0.2:.2f}"
+                if "净资产收益率" in query:
+                    row["净资产收益率"] = f"{15 + seed % 7 - index}.4%"
             rows.insert(
                 1,
-                {
-                    "date": "2024-09-30",
-                    "每股收益": f"{4.8 + seed / 10:.2f}",
-                    "净资产收益率": f"{14 + seed % 7}.1%",
-                },
+                {"date": "2024-09-30"},
             )
+            if "每股收益" in query:
+                rows[1]["每股收益"] = f"{4.8 + seed / 10:.2f}"
+            if "净资产收益率" in query:
+                rows[1]["净资产收益率"] = f"{14 + seed % 7}.1%"
+            fieldnames = ["date"]
+            if "每股收益" in query:
+                fieldnames.append("每股收益")
+            if "净资产收益率" in query:
+                fieldnames.append("净资产收益率")
             return (
                 [
                     {
                         "sheet_name": "盈利指标",
-                        "fieldnames": ["date", "每股收益", "净资产收益率"],
+                        "fieldnames": fieldnames,
                         "rows": rows,
                     }
                 ],
@@ -158,18 +164,24 @@ class FakeMXData:
             )
         if "市盈率" in query or "市净率" in query:
             rows = [
-                {
-                    "date": year,
-                    "市盈率": f"{12 + seed % 8 - index * 0.5:.1f}",
-                    "市净率": f"{2 + seed % 5 - index * 0.1:.1f}",
-                }
+                {"date": year}
                 for index, year in enumerate(years)
             ]
+            for index, row in enumerate(rows):
+                if "市盈率" in query:
+                    row["市盈率"] = f"{12 + seed % 8 - index * 0.5:.1f}"
+                if "市净率" in query:
+                    row["市净率"] = f"{2 + seed % 5 - index * 0.1:.1f}"
+            fieldnames = ["date"]
+            if "市盈率" in query:
+                fieldnames.append("市盈率")
+            if "市净率" in query:
+                fieldnames.append("市净率")
             return (
                 [
                     {
                         "sheet_name": "估值指标",
-                        "fieldnames": ["date", "市盈率", "市净率"],
+                        "fieldnames": fieldnames,
                         "rows": rows,
                     }
                 ],
@@ -177,34 +189,54 @@ class FakeMXData:
                 len(rows),
                 None,
             )
-        if "经营活动产生的现金流量净额" in query or "投资活动现金流出小计" in query:
+        if any(
+            metric in query
+            for metric in (
+                "经营活动产生的现金流量净额",
+                "净利润",
+                "固定资产和投资性房地产折旧",
+                "使用权资产折旧",
+                "无形资产摊销",
+                "长期待摊费用摊销",
+                "投资活动现金流出小计",
+            )
+        ):
             rows = [
-                {
-                    "date": year,
-                    "净利润": f"{100 + seed - index}亿",
-                    "固定资产和投资性房地产折旧": f"{8 + index}亿",
-                    "使用权资产折旧": "3亿",
-                    "无形资产摊销": "2亿",
-                    "长期待摊费用摊销": "1亿",
-                    "投资活动现金流出小计": f"{60 + index}亿",
-                    "经营活动产生的现金流量净额": f"{120 + seed - index}亿",
-                }
+                {"date": year}
                 for index, year in enumerate(years)
             ]
+            for index, row in enumerate(rows):
+                if "净利润" in query:
+                    row["净利润"] = f"{100 + seed - index}亿"
+                if "固定资产和投资性房地产折旧" in query:
+                    row["固定资产和投资性房地产折旧"] = f"{8 + index}亿"
+                if "使用权资产折旧" in query:
+                    row["使用权资产折旧"] = "3亿"
+                if "无形资产摊销" in query:
+                    row["无形资产摊销"] = "2亿"
+                if "长期待摊费用摊销" in query:
+                    row["长期待摊费用摊销"] = "1亿"
+                if "投资活动现金流出小计" in query:
+                    row["投资活动现金流出小计"] = f"{60 + index}亿"
+                if "经营活动产生的现金流量净额" in query:
+                    row["经营活动产生的现金流量净额"] = f"{120 + seed - index}亿"
+            fieldnames = ["date"]
+            for fieldname in (
+                "净利润",
+                "固定资产和投资性房地产折旧",
+                "使用权资产折旧",
+                "无形资产摊销",
+                "长期待摊费用摊销",
+                "投资活动现金流出小计",
+                "经营活动产生的现金流量净额",
+            ):
+                if fieldname in rows[0]:
+                    fieldnames.append(fieldname)
             return (
                 [
                     {
                         "sheet_name": "现金流量指标",
-                        "fieldnames": [
-                            "date",
-                            "净利润",
-                            "固定资产和投资性房地产折旧",
-                            "使用权资产折旧",
-                            "无形资产摊销",
-                            "长期待摊费用摊销",
-                            "投资活动现金流出小计",
-                            "经营活动产生的现金流量净额",
-                        ],
+                        "fieldnames": fieldnames,
                         "rows": rows,
                     }
                 ],
@@ -213,19 +245,22 @@ class FakeMXData:
                 None,
             )
 
-        rows = [
-            {
-                "date": year,
-                "流动比率": f"{1 + seed % 3 - index * 0.1:.1f}",
-                "资产负债率": f"{20 + seed % 15 - index}.10%",
-            }
-            for index, year in enumerate(years)
-        ]
+        rows = [{"date": year} for index, year in enumerate(years)]
+        for index, row in enumerate(rows):
+            if "流动比率" in query:
+                row["流动比率"] = f"{1 + seed % 3 - index * 0.1:.1f}"
+            if "资产负债率" in query:
+                row["资产负债率"] = f"{20 + seed % 15 - index}.10%"
+        fieldnames = ["date"]
+        if "流动比率" in query:
+            fieldnames.append("流动比率")
+        if "资产负债率" in query:
+            fieldnames.append("资产负债率")
         return (
             [
                 {
                     "sheet_name": "财务风险指标",
-                    "fieldnames": ["date", "流动比率", "资产负债率"],
+                    "fieldnames": fieldnames,
                     "rows": rows,
                 }
             ],

@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime
@@ -142,6 +143,12 @@ _FREE_CASH_FLOW_OPTIONAL_LABELS = frozenset(
         "长期待摊费用摊销",
     }
 )
+_RATE_LIMIT_ERROR_TOKENS = ("状态码 112", "请求频率过高")
+_LIVE_MX_QUERY_INTERVAL_SECONDS = float(os.getenv("EASTMONEY_MX_QUERY_INTERVAL_SECONDS", "0.35"))
+_LIVE_MX_QUERY_MAX_ATTEMPTS = max(1, int(os.getenv("EASTMONEY_MX_QUERY_MAX_ATTEMPTS", "3")))
+_LIVE_MX_QUERY_RETRY_BACKOFF_SECONDS = float(
+    os.getenv("EASTMONEY_MX_QUERY_RETRY_BACKOFF_SECONDS", "0.75")
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,6 +252,67 @@ def _format_amount_value(value: Decimal, preferred_units: list[str]) -> str:
     if text in {"", "-0"}:
         text = "0"
     return f"{text}{chosen_unit}"
+
+
+def _unique_preserving_order(values: list[str]) -> list[str]:
+    unique_values: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_values.append(normalized)
+    return unique_values
+
+
+def _is_live_mx_client(client: Any) -> bool:
+    delegate = getattr(client, "_delegate", client)
+    return delegate.__class__.__module__ == "eastmoney_mx_data"
+
+
+def _is_rate_limit_error(message: str | None) -> bool:
+    text = str(message or "").strip()
+    return bool(text) and any(token in text for token in _RATE_LIMIT_ERROR_TOKENS)
+
+
+def _sleep_for_live_mx(delay_seconds: float) -> None:
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
+
+
+def _query_mx_with_retry(
+    client: Any,
+    query_text: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[str], int, str | None]:
+    live_client = _is_live_mx_client(client)
+    last_exception: Exception | None = None
+
+    for attempt in range(1, _LIVE_MX_QUERY_MAX_ATTEMPTS + 1):
+        try:
+            result = client.query(query_text)
+            tables, conditions, total_rows, error = client.parse_result(result)
+        except Exception as exc:
+            last_exception = exc
+            if live_client and _is_rate_limit_error(str(exc)) and attempt < _LIVE_MX_QUERY_MAX_ATTEMPTS:
+                _sleep_for_live_mx(
+                    _LIVE_MX_QUERY_INTERVAL_SECONDS
+                    + _LIVE_MX_QUERY_RETRY_BACKOFF_SECONDS * attempt
+                )
+                continue
+            raise
+
+        if live_client and _is_rate_limit_error(error) and attempt < _LIVE_MX_QUERY_MAX_ATTEMPTS:
+            _sleep_for_live_mx(
+                _LIVE_MX_QUERY_INTERVAL_SECONDS
+                + _LIVE_MX_QUERY_RETRY_BACKOFF_SECONDS * attempt
+            )
+            continue
+        return result, tables, conditions, total_rows, error
+
+    if last_exception is not None:
+        raise last_exception
+    raise RuntimeError(f"东方财富妙想查询失败：{query_text}")
 
 
 def _merge_section_rows(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -523,10 +591,10 @@ def extract_entity_label(result: dict[str, Any], fallback_symbol: str) -> str:
     return fallback_symbol
 
 
-def build_section_queries(target: StockTarget) -> tuple[tuple[str, str], ...]:
+def build_section_queries(target: StockTarget) -> tuple[tuple[str, tuple[str, ...]], ...]:
     return tuple(
-        (title, f"{target.symbol} {suffix}")
-        for title, suffix in REPORT_QUERY_BUNDLES
+        (title, tuple(f"{target.symbol} {suffix}" for suffix in suffixes))
+        for title, suffixes in REPORT_QUERY_BUNDLES
     )
 
 
@@ -544,21 +612,52 @@ def query_fundamental_section(
     client: Any,
     target: StockTarget,
     title: str,
-    query_text: str,
+    query_texts: tuple[str, ...],
 ) -> tuple[SectionResult, str]:
-    logger.debug("Querying section %s for %s with %s", title, target.symbol, query_text)
-    result = client.query(query_text)
-    tables, conditions, _total_rows, error = client.parse_result(result)
-    filtered_tables = finalize_section_tables(title, filter_section_tables(title, tables))
+    logger.debug("Querying section %s for %s with %s", title, target.symbol, query_texts)
+    filtered_tables: list[dict[str, Any]] = []
+    conditions: list[str] = []
+    partial_errors: list[str] = []
+    entity_label = target.symbol
+
+    for query_text in query_texts:
+        try:
+            result, tables, query_conditions, _total_rows, error = _query_mx_with_retry(
+                client,
+                query_text,
+            )
+        except Exception as exc:
+            partial_errors.append(f"{query_text}: {exc}")
+            continue
+
+        resolved_entity_label = extract_entity_label(result, target.symbol)
+        if resolved_entity_label != target.symbol:
+            entity_label = resolved_entity_label
+
+        filtered_tables.extend(filter_section_tables(title, tables))
+        conditions.extend(str(condition).strip() for condition in query_conditions if str(condition).strip())
+        if error:
+            partial_errors.append(f"{query_text}: {error}")
+        if _is_live_mx_client(client):
+            _sleep_for_live_mx(_LIVE_MX_QUERY_INTERVAL_SECONDS)
+
+    if partial_errors and filtered_tables:
+        conditions.extend(f"部分查询失败：{message}" for message in partial_errors)
+
+    finalized_tables = finalize_section_tables(title, filtered_tables)
+    error = None
+    if not finalized_tables and partial_errors:
+        error = "；".join(partial_errors)
+
     return (
         SectionResult(
             title=title,
-            query_text=query_text,
-            tables=filtered_tables,
-            conditions=conditions,
+            query_text="\n".join(query_texts),
+            tables=finalized_tables,
+            conditions=_unique_preserving_order(conditions),
             error=error,
         ),
-        extract_entity_label(result, target.symbol),
+        entity_label,
     )
 
 
@@ -566,13 +665,13 @@ def collect_stock_report(client: Any, target: StockTarget) -> StockReport:
     sections: list[SectionResult] = []
     entity_label = target.symbol
     logger.debug("Collecting report sections for %s", target.symbol)
-    for title, query_text in build_section_queries(target):
+    for title, query_texts in build_section_queries(target):
         try:
             section, resolved_entity_label = query_fundamental_section(
                 client,
                 target,
                 title,
-                query_text,
+                query_texts,
             )
             if resolved_entity_label != target.symbol:
                 entity_label = resolved_entity_label
@@ -580,7 +679,7 @@ def collect_stock_report(client: Any, target: StockTarget) -> StockReport:
             logger.debug("Section %s failed for %s: %s", title, target.symbol, exc)
             section = SectionResult(
                 title=title,
-                query_text=query_text,
+                query_text="\n".join(query_texts),
                 tables=[],
                 conditions=[],
                 error=str(exc),
@@ -626,7 +725,12 @@ def render_markdown_table(fieldnames: list[str], rows: list[dict[str, Any]], max
 
 
 def render_section(section: SectionResult) -> str:
-    lines = [f"### {section.title}", "", f"查询语句：{section.query_text}", ""]
+    lines = [f"### {section.title}", ""]
+    query_texts = [line.strip() for line in section.query_text.splitlines() if line.strip()]
+    for query_text in query_texts or [section.query_text.strip()]:
+        if not query_text:
+            continue
+        lines.extend([f"查询语句：{query_text}", ""])
     if section.title == "现金流量指标":
         lines.extend([
             f"指标口径：自由现金流量 = {FREE_CASH_FLOW_FORMULA}",

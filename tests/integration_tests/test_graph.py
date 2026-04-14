@@ -14,6 +14,16 @@ pytestmark = pytest.mark.anyio
 logger = logging.getLogger(__name__)
 
 
+def _assert_queries_observed_in_order(actual_queries: list[str], expected_queries: tuple[str, ...]) -> None:
+    actual_index = 0
+    for expected_query in expected_queries:
+        while actual_index < len(actual_queries) and actual_queries[actual_index] != expected_query:
+            actual_index += 1
+        if actual_index >= len(actual_queries):
+            raise AssertionError(f"未按顺序观察到预期查询语句：{expected_query}")
+        actual_index += 1
+
+
 async def test_graph_generates_markdown_report_with_live_mx_skill(
     patch_live_mx_data_client,
     patch_fake_llm_summarizer,
@@ -26,7 +36,8 @@ async def test_graph_generates_markdown_report_with_live_mx_skill(
     output_text = str(result["messages"][-1].content)
     expected_queries = tuple(
         query
-        for _title, query in build_section_queries(StockTarget(code="600519", market="SH"))
+        for _title, queries in build_section_queries(StockTarget(code="600519", market="SH"))
+        for query in queries
     )
     report_path, report_text = assert_generated_markdown_report(
         report_output_dir,
@@ -36,7 +47,7 @@ async def test_graph_generates_markdown_report_with_live_mx_skill(
     )
     logger.debug("Live integration output: %s", output_text)
     logger.debug("Live integration report path: %s", report_path)
-    assert patch_live_mx_data_client.query_log == list(expected_queries)
+    _assert_queries_observed_in_order(patch_live_mx_data_client.query_log, expected_queries)
     assert_report_contains_queries(report_text, expected_queries)
     assert "600519.SH" in output_text
     assert "已调用东方财富妙想 mx-data skill 完成个股基本面查询。" in output_text

@@ -11,6 +11,7 @@ from fundamentals_agent.fundamentals import (
     extract_cn_stock_targets,
     generate_cn_stock_fundamental_report,
 )
+from fundamentals_agent.metrics import canonicalize_metric_label
 from fundamentals_agent.report_formatting import build_fundamentals_formatting_prompt
 from fundamentals_agent.graph import graph
 from tests.report_checks import (
@@ -24,7 +25,9 @@ logger = logging.getLogger(__name__)
 def _expected_queries(symbol: str) -> tuple[str, ...]:
     code, market = symbol.split(".")
     return tuple(
-        query for _title, query in build_section_queries(StockTarget(code=code, market=market))
+        query
+        for _title, queries in build_section_queries(StockTarget(code=code, market=market))
+        for query in queries
     )
 
 
@@ -147,14 +150,51 @@ def test_build_section_queries_use_correct_metric_scope() -> None:
     expected_queries = dict(build_section_queries(StockTarget(code="600519", market="SH")))
 
     assert expected_queries == {
-        "盈利指标": "600519.SH 每股收益 净资产收益率 近五年 年报",
-        "估值指标": "600519.SH 市盈率 市净率 近五年 年报",
-        "现金流量指标": (
-            "600519.SH 经营活动产生的现金流量净额 净利润 固定资产和投资性房地产折旧 "
-            "使用权资产折旧 无形资产摊销 长期待摊费用摊销 投资活动现金流出小计 近五年 年报"
+        "盈利指标": (
+            "600519.SH 每股收益 近五年 年报",
+            "600519.SH 净资产收益率 近五年 年报",
         ),
-        "财务风险指标": "600519.SH 流动比率 资产负债率 近五年 年报",
+        "估值指标": (
+            "600519.SH 市盈率 近五年 年报",
+            "600519.SH 市净率 近五年 年报",
+        ),
+        "现金流量指标": (
+            "600519.SH 经营活动产生的现金流量净额 近五年 年报",
+            "600519.SH 净利润 近五年 年报",
+            "600519.SH 固定资产和投资性房地产折旧 近五年 年报",
+            "600519.SH 使用权资产折旧 近五年 年报",
+            "600519.SH 无形资产摊销 近五年 年报",
+            "600519.SH 长期待摊费用摊销 近五年 年报",
+            "600519.SH 投资活动现金流出小计 近五年 年报",
+        ),
+        "财务风险指标": (
+            "600519.SH 流动比率 近五年 年报",
+            "600519.SH 资产负债率 近五年 年报",
+        ),
     }
+    for queries in expected_queries.values():
+        assert queries
+        for query in queries:
+            assert "近五年 年报" in query
+
+
+def test_canonicalize_metric_label_accepts_live_mx_field_aliases() -> None:
+    assert canonicalize_metric_label("每股收益EPS(基本)") == "每股收益"
+    assert canonicalize_metric_label("净资产收益率ROE(加权)") == "净资产收益率"
+    assert canonicalize_metric_label("市盈率(TTM)") == "市盈率"
+
+
+def test_collect_reports_compute_free_cash_flow_from_individual_queries(
+    patch_fake_mx_data_client,
+) -> None:
+    _targets, reports = collect_reports_from_input("请分析 600519 的基本面")
+
+    cashflow_section = next(section for section in reports[0].sections if section.title == "现金流量指标")
+    rows = cashflow_section.tables[0]["rows"]
+
+    assert rows[0]["date"] == "2024"
+    assert rows[0]["营业现金流量"] == "139亿"
+    assert rows[0]["自由现金流量"] == "73亿"
 
 
 def test_generate_cn_stock_fundamental_report_returns_completion_message(

@@ -7,9 +7,18 @@ from functools import lru_cache
 import re
 from typing import Any
 
+DEFAULT_HISTORY_SCOPE = "近五年 年报"
+
 FREE_CASH_FLOW_FORMULA = (
     "净利润+固定资产和投资性房地产折旧+使用权资产折旧+无形资产摊销+长期待摊费用摊销-投资活动现金流出"
 )
+
+
+def _resolve_history_scope(value: str | None) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise ValueError("东方财富妙想查询必须携带时间范围")
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,13 +47,17 @@ class FundamentalMetric:
 class FundamentalMetricGroup:
     title: str
     metrics: tuple[FundamentalMetric, ...]
-    history_scope: str | None = "近五年 年报"
+    history_scope: str | None = DEFAULT_HISTORY_SCOPE
 
-    def query_terms(self) -> tuple[str, ...]:
-        terms = [metric.query_term for metric in self.metrics if metric.include_in_queries]
-        if self.history_scope:
-            terms.append(self.history_scope)
-        return tuple(terms)
+    def query_terms(self, history_scope: str | None = None) -> tuple[str, ...]:
+        resolved_scope = _resolve_history_scope(
+            self.history_scope if history_scope is None else history_scope
+        )
+        return tuple(
+            f"{metric.query_term} {resolved_scope}"
+            for metric in self.metrics
+            if metric.include_in_queries
+        )
 
     def report_metrics(self) -> tuple[FundamentalMetric, ...]:
         return tuple(metric for metric in self.metrics if metric.include_in_schema)
@@ -128,8 +141,8 @@ FUNDAMENTAL_METRIC_GROUPS: tuple[FundamentalMetricGroup, ...] = (
     ),
 )
 
-REPORT_QUERY_BUNDLES: tuple[tuple[str, str], ...] = tuple(
-    (group.title, " ".join(group.query_terms()))
+REPORT_QUERY_BUNDLES: tuple[tuple[str, tuple[str, ...]], ...] = tuple(
+    (group.title, group.query_terms())
     for group in FUNDAMENTAL_METRIC_GROUPS
 )
 
@@ -156,6 +169,26 @@ def _normalize_label(value: Any) -> str:
     text = text.replace("（", "(").replace("）", ")")
     text = re.sub(r"\s+", "", text)
     return text.lower()
+
+
+def _normalized_label_candidates(value: Any) -> tuple[str, ...]:
+    normalized = _normalize_label(value)
+    if not normalized:
+        return ()
+
+    candidates = [normalized]
+    without_parentheses = re.sub(r"\([^)]*\)", "", normalized)
+    if without_parentheses and without_parentheses not in candidates:
+        candidates.append(without_parentheses)
+
+    stripped_suffix = re.sub(
+        r"(?<=[\u4e00-\u9fff])[a-z0-9./%_-]+$",
+        "",
+        without_parentheses,
+    )
+    if stripped_suffix and stripped_suffix not in candidates:
+        candidates.append(stripped_suffix)
+    return tuple(candidates)
 
 
 def _unique_preserving_order(values: list[str]) -> list[str]:
@@ -185,10 +218,11 @@ def _metric_group_map() -> dict[str, FundamentalMetricGroup]:
 
 
 def canonicalize_metric_label(label: Any) -> str | None:
-    normalized = _normalize_label(label)
-    if not normalized:
-        return None
-    return _metric_alias_map().get(normalized)
+    for normalized in _normalized_label_candidates(label):
+        canonical_label = _metric_alias_map().get(normalized)
+        if canonical_label is not None:
+            return canonical_label
+    return None
 
 
 def get_metric_group(title: str) -> FundamentalMetricGroup | None:
@@ -321,6 +355,7 @@ def serialize_metric_schema() -> list[dict[str, Any]]:
 
 
 __all__ = [
+    "DEFAULT_HISTORY_SCOPE",
     "FREE_CASH_FLOW_FORMULA",
     "FUNDAMENTAL_METRIC_GROUPS",
     "REPORT_QUERY_BUNDLES",
